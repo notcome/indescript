@@ -189,15 +189,6 @@ e5  =  EAbs (EV "m") (ELet (EV "y") (EVar (EV "m"))
                      (ELet (EV "x") (EApp (EVar (EV "y")) (ELit (LBool True)))
                           (EVar (EV "x"))))
 
-e6 =
-{-
-let ycomb = \ h -> (\ x -> x x) (\g -> h ())
-
-(define Y
-    (lambda (f)
-      (f (lambda (x) ((Y f) x)))))
--}
-
 test :: Exp -> IO ()
 test e = case typeInference (TypeEnv Map.empty) e of
            Left err  ->  putStrLn $ "error: " ++ err
