@@ -6,7 +6,7 @@
 module Language.Indescript.TypeInference where
 
 import Control.Monad.State
-import Control.Monad.Except
+import Control.Proc
 import Data.Monoid ((<>))
 import           Data.Map.Strict (Map, (!))
 import qualified Data.Map.Strict as Map
@@ -72,9 +72,9 @@ instance Substitutable Constraints where
 
 unify :: Constraints -> Substitution
 unify []              = Map.empty
-unify ((s :== t):cs') = case runExcept proc of
-    (Left  subst) -> subst
-    (Right msg)   -> error msg
+unify ((s :== t):cs') = case runProc proc of
+    (Left  msg) -> error msg
+    (Right res) -> res
   where
     sEqX (s' :== (TVar _)) = s' == s
     sEqX _                 = False
@@ -84,12 +84,6 @@ unify ((s :== t):cs') = case runExcept proc of
     toArrow (TArr s1 s2) (TArr t1 t2) = Just (s1, s2, t1, t2)
     toArrow _            _            = Nothing
 
-    tryBool :: (MonadError e m) => Bool -> e -> m ()
-    tryBool cond res = if cond then throwError res
-                   else return ()
-    tryMaybe :: (MonadError e m) => Maybe a -> (a -> e) -> m ()
-    tryMaybe (Just x) f = throwError $ f x
-    tryMaybe Nothing  _ = return ()
     proc = do
       tryBool (s == t) (unify cs')
       tryMaybe (List.find sEqX cs') (\(_ :== (TVar x))
