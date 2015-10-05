@@ -1,22 +1,24 @@
 {-# LANGUAGE TupleSections        #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE FlexibleContexts     #-}
 
 module Language.Indescript.TypeInference where
 
 import Control.Monad.State
-import Control.Proc
 import Data.Monoid ((<>))
-import           Data.Map.Strict (Map, (!))
 import qualified Data.Map.Strict as Map
-import qualified Data.List       as List
 
 import Language.Indescript.ADT
 
-type Env = Map EVar Type
+type Env = Map.Map EVar Type
+prelude :: Env
+prelude = Map.fromList [
+    (LEVar "eq", TArr (TVar $ LTVar "a") (TArr (TVar $ LTVar "a") TBool))
+  , (LEVar "add", TArr TInt (TArr TInt TInt))
+  , (LEVar "sub", TArr TInt (TArr TInt TInt))]
 
-data Constraint  = Type :== Type
+data Constraint  = Type :== Type deriving Show
 type Constraints = [Constraint]
 
 nextTVar :: State Int Type
@@ -27,7 +29,9 @@ nextTVar = do count <- get
 
 generateConstraints :: Env -> Exp -> State Int (Type, Constraints)
 generateConstraints env (EVar v) = return (ty, [])
-  where ty = env ! v
+  where ty = case Map.lookup v env of
+          (Just x) -> x
+          Nothing  -> error $ show v <> " not found"
 generateConstraints _   (ELit x) = return (ty, [])
   where ty = case x of LBool _ -> TBool
                        LInt  _ -> TInt
@@ -54,42 +58,61 @@ generateConstraints env (ELet f e1 e2) =
      let cs   =  c1 <> c2 <> [tf :== t1]
      return (t2, cs)
 
-type Substitution = Map TVar Type
+type Substitution = Map.Map TVar Type
 
 (|=>) :: TVar -> Type -> Substitution
 v |=> t = Map.singleton v t
 
 after :: Substitution -> Substitution -> Substitution
-after = undefined
+σ2 `after` σ1 = Map.union σ2' σ2
+  where σ2' = Map.map (apply σ2) σ1
 
 class Substitutable a where
   apply    :: Substitution -> a -> a
-  freeVars :: a -> [TVar]
+
+instance Substitutable Type where
+  apply _ TBool        = TBool
+  apply _ TInt         = TInt
+  apply σ t@(TVar v)   = Map.findWithDefault t v σ
+  apply σ (TArr t1 t2) = apply σ t1 `TArr` apply σ t2
+
+instance Substitutable Constraint where
+  apply σ (t1 :== t2) = apply σ t1 :== apply σ t2
 
 instance Substitutable Constraints where
-  apply    = undefined
-  freeVars = undefined
+  apply σ = fmap $ apply σ
 
 unify :: Constraints -> Substitution
 unify []              = Map.empty
-unify ((s :== t):cs') = case runProc proc of
-    (Left  msg) -> error msg
-    (Right res) -> res
+unify ((s :== t):cs') = algorithm s t cs'
   where
-    sEqX (s' :== (TVar _)) = s' == s
-    sEqX _                 = False
-    xEqT ((TVar _) :== t') = t' == t
-    xEqT _                 = False
+    isTVar (TVar _) = True
+    isTVar _        = False
 
-    toArrow (TArr s1 s2) (TArr t1 t2) = Just (s1, s2, t1, t2)
-    toArrow _            _            = Nothing
+    trySubst :: TVar -> TVar -> Constraint -> [TVar]
+    trySubst s t ((TVar l) :== (TVar r)) = if pred l r then [r]
+                                      else if pred r l then [l]
+                                      else []
+      where eqST x   = x == s || x == t
+            pred l r = eqST l && (not . eqST) r
+    trySubst _ _ _                       = []
 
-    proc = do
-      tryBool (s == t) (unify cs')
-      tryMaybe (List.find sEqX cs') (\(_ :== (TVar x))
-        -> (unify $ apply (x |=> t) cs') `after` (x |=> t))
-      tryMaybe (List.find xEqT cs') (\((TVar x) :== _)
-        -> (unify $ apply (x |=> s) cs') `after` (x |=> s))
-      tryMaybe (toArrow s t) (\(s1, s2, t1, t2)
-        -> unify $ cs' <> [s1 :== t1, s2 :== t2])
-      return "unification failed"
+    algorithm :: Type -> Type -> Constraints -> Substitution
+    algorithm s t cs
+      | s == t          = unify cs
+      | not $ isTVar s
+      , isTVar t        = unify $ (t :== s):cs
+      | TArr s1 s2 <- s
+      , TArr t1 t2 <- t = unify $ [s1 :== t1, s2 :== t2] <> cs
+      | TVar s' <- s
+      , TVar t' <- t    = let
+        substs  = Map.fromList $ map (, t) $ concatMap (trySubst s' t') cs
+        substs' = (s' |=> t) `after` substs
+        in (unify $ apply substs' cs) `after` substs'
+      | TVar s' <- s    = (unify $ apply (s' |=> t) cs) `after` (s' |=> t)
+      | otherwise       = error "unification failed"
+
+infer :: Exp -> Type
+infer exp = let (ty, cs)     = evalState (generateConstraints prelude exp) 0
+                substitution = unify cs
+            in apply substitution ty
