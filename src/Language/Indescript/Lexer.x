@@ -72,11 +72,10 @@ tokens :-
 
 {
 alexEOF :: Alex PosToken
-alexEOF = return (TokenPos (-1) (-1) (-1) (-1), TkEOF)
+alexEOF = return (TokenPos (-1) (-1) (-1), TkEOF)
 
 tok :: (String -> Token) -> AlexInput -> Int -> Alex PosToken
-tok f (p, _, _, s) len = return (convertAlexPosn p, f $ take len s)
-  where convertAlexPosn (AlexPn offset line column) = TokenPos offset line column line
+tok f (p, _, _, s) len = return (alexPosnToTokenPos p, f $ take len s)
 
 tokWhite   = tok $ const TkWhite
 tokComment = tok $ const TkComment
@@ -148,8 +147,9 @@ data TokenPos = TokenPos
               { tokenOffset :: Int
               , tokenLine   :: Int
               , tokenColumn :: Int
-              , tokenWidth  :: Int
               } deriving (Eq, Show)
+
+alexPosnToTokenPos (AlexPn offset line column) = TokenPos offset line column
 
 type PosToken = (TokenPos, Token)
 
