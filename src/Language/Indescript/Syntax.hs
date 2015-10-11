@@ -23,8 +23,7 @@ data Pattern a = PLit Literal a
                | PAt  EVar (Pattern a) a
                deriving (Eq, Show, Functor)
 
-data Supercomb a = SCConst EVar (Expr a) a
-                 | SCFun   EVar [Pattern a] (Expr a) a
+data Supercomb a = Supercomb EVar [Pattern a] (Expr a) a
                  deriving (Eq, Show, Functor)
 
 data Type = TLit    TVar
