@@ -8,6 +8,7 @@ import           Text.Megaparsec.Prim      (MonadParsec)
 import           Text.Megaparsec.Error
 import           Text.Megaparsec.ShowToken
 
+import Language.Indescript.Syntax
 import Language.Indescript.Lexer
 
 updatePosToken :: Int -> P.SourcePos -> PosToken -> P.SourcePos

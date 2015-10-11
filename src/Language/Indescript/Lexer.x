@@ -4,6 +4,8 @@ module Language.Indescript.Lexer where
 
 import Data.Char (toLower, readLitChar)
 import Prelude hiding (lex)
+
+import Language.Indescript.Syntax
 }
 
 %wrapper "monad"
@@ -152,12 +154,6 @@ data TokenPos = TokenPos
               } deriving (Eq, Show)
 
 type PosToken = (TokenPos, Token)
-
-data Literal = LInt    Int
-             | LFloat  Float
-             | LChar   Char
-             | LString String
-             deriving (Eq, Show)
 
 data ParenType = CircleParen
                | SquareParen

@@ -17,6 +17,7 @@ library
   exposed-modules:     Language.Indescript.ADT
                      , Language.Indescript.TypeInference
                      , Language.Indescript.Parser
+                     , Language.Indescript.Syntax
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , mtl
