@@ -53,24 +53,25 @@ $white   = [$newline $space $tab]
 
 -- Rules
 tokens :-
-<0> $white+            { tokWhite          }
-<0> "--" [^$symbol] .* { tokComment        }
+<0> $white+      { tokWhite          }
+<0> "--" [^$symbol] [^$newline]* $newline
+                 { tokComment        }
 
-<0> @varid             { tokId    TkVarId  }
-<0> @conid             { tokId    TkConId  }
-<0> @varsym            { tokSym   TkVarSym }
-<0> @consym            { tokSym   TkConSym }
-<0> @special           { tokPunc           }
-<0> @integer           { tokInt            }
-<0> @float             { tokFloat          }
+<0> @varid       { tokId    TkVarId  }
+<0> @conid       { tokId    TkConId  }
+<0> @varsym      { tokSym   TkVarSym }
+<0> @consym      { tokSym   TkConSym }
+<0> @special     { tokPunc           }
+<0> @integer     { tokInt            }
+<0> @float       { tokFloat          }
 
-<0>      \"            { begin string      }
-<string> [^\"]+        { tokString         }
-<string> \"            { begin 0           }
+<0>      \"      { begin string      }
+<string> [^\"]+  { tokString         }
+<string> \"      { begin 0           }
 -- " -- Fix Atom’s code highlight
-<0>      \'            { begin char        }
-<char>   [^\']+        { tokChar           }
-<char>   \'            { begin 0           }
+<0>      \'      { begin char        }
+<char>   [^\']+  { tokChar           }
+<char>   \'      { begin 0           }
 
 {
 alexEOF :: Alex PosToken
@@ -144,7 +145,30 @@ data Token = TkLiteral   Literal
            | TkComma
            | TkSemicolon
            | TkEOF
-           deriving (Eq, Show)
+           deriving (Eq)
+
+instance Show Token where
+  show (TkLiteral  (LInt    x)) = show x
+  show (TkLiteral  (LFloat  x)) = show x
+  show (TkLiteral  (LChar   x)) = show x
+  show (TkLiteral  (LString x)) = show x
+  show (TkVarId    x)           = x
+  show (TkVarSym   x)           = x
+  show (TkConId    x)           = x
+  show (TkConSym   x)           = x
+  show (TkReserved x)           = x
+  show (TkLParen   CircleParen) = "("
+  show (TkRParen   CircleParen) = ")"
+  show (TkLParen   SquareParen) = "["
+  show (TkRParen   SquareParen) = "]"
+  show (TkLParen   CurlyParen)  = "{"
+  show (TkRParen   CurlyParen)  = "}"
+  show TkWhite                  = " "
+  show TkComment                = "-- lorem ipsum\n"
+  show TkBacktick               = "`"
+  show TkComma                  = ","
+  show TkSemicolon              = ";"
+  show TkEOF                    = ""
 
 data TokenPos = TokenPos
               { tokenOffset :: Int

@@ -1,8 +1,6 @@
 {-# LANGUAGE DeriveFunctor #-}
 module Language.Indescript.Syntax where
 
-import Data.Functor
-
 data Expr a = ELit   Literal a
             | EVar   EVar a
             | ECon   ECon a
@@ -33,8 +31,12 @@ data Type = TLit    TVar
           | TForall [TVar] Type
           deriving (Eq, Show)
 
-newtype EVar = LEVar String deriving (Eq, Ord, Show)
-newtype TVar = LTVar String deriving (Eq, Ord, Show)
+data EVar = EVStr String
+          | EVSym String
+          deriving (Eq, Ord, Show)
+data TVar = TVStr String
+          | TVSym String
+          deriving (Eq, Ord, Show)
 type ECon    = (EVar, Int)
 type TCon    = (TVar, Int)
 
