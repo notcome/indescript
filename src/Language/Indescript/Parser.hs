@@ -13,7 +13,7 @@ import           Text.Megaparsec.Error
 import           Text.Megaparsec.ShowToken
 
 import Language.Indescript.Syntax
-import Language.Indescript.Lexer
+import Language.Indescript.Parser.Lexer
 
 updatePosToken :: Int -> P.SourcePos -> PosToken -> P.SourcePos
 updatePosToken _ pos (tokenPos, _) = let
@@ -109,5 +109,5 @@ instance (GetSourcePos a, GetSourcePos b) => GetSourcePos (a, b) where
   getSourcePos = undefined
 
 test :: String -> P.Parsec [PosToken] (Expr TokenPos) -> Either P.ParseError (Expr TokenPos)
-test input parser = let (Right lexed) = Language.Indescript.Lexer.lex input
+test input parser = let (Right lexed) = Language.Indescript.Parser.Lexer.lex input
                     in P.parse parser "(source)" lexed

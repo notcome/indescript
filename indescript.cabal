@@ -18,13 +18,15 @@ library
                      , Language.Indescript.TypeInference
                      , Language.Indescript.Parser
                      , Language.Indescript.Syntax
+                     , Language.Indescript.Parser.SourcePos
+                     , Data.Convertible
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , mtl
                      , array
                      , megaparsec
   build-tools:         alex
-  other-modules:       Language.Indescript.Lexer
+  other-modules:       Language.Indescript.Parser.Lexer
   default-language:    Haskell2010
 
 executable indescript-exe

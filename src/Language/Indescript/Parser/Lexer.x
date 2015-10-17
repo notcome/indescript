@@ -1,11 +1,11 @@
 {
 {-# OPTIONS_GHC -fno-warn-tabs #-}
-module Language.Indescript.Lexer where
+module Language.Indescript.Parser.Lexer where
 
 import Data.Char (toLower, readLitChar)
-import Prelude hiding (lex)
 
 import Language.Indescript.Syntax
+import Language.Indescript.Parser.SourcePos
 }
 
 %wrapper "monad"
@@ -29,7 +29,7 @@ $symbol  = [\!\#\$\%\&\*\+\.\/\<\=\>\?\@\\\^\|\-\~\:]
 $tab     = [\t]
 $space   = [\ ]
 $newline = [\n\r\f]
-$white   = [$newline $space $tab]
+$white   = [$space $tab]
 
 -- Regular Expressions
 @bin = $binit+
@@ -54,7 +54,8 @@ $white   = [$newline $space $tab]
 -- Rules
 tokens :-
 <0> $white+      { tokWhite          }
-<0> "--" [^$symbol] [^$newline]* $newline
+<0> $newline     { tokNewline        }
+<0> "--" [^$symbol] [^$newline]*
                  { tokComment        }
 
 <0> @varid       { tokId    TkVarId  }
@@ -74,14 +75,49 @@ tokens :-
 <char>   \'      { begin 0           }
 
 {
-alexEOF :: Alex PosToken
-alexEOF = return (TokenPos (-1) (-1) (-1) (-1), TkEOF)
+data Token = TkLiteral   Literal
+           | TkVarId     String
+           | TkVarSym    String
+           | TkConId     String
+           | TkConSym    String
+           | TkReserved  String
+           | TkLParen    ParenType
+           | TkRParen    ParenType
+           | TkWhite
+           | TkNewline
+           | TkComment
+           | TkBacktick
+           | TkComma
+           | TkSemicolon
+           deriving (Eq)
 
-tok :: (String -> Token) -> AlexInput -> Int -> Alex PosToken
-tok f (p, _, _, s) len = return (convertAlexPosn p, f $ take len s)
-  where convertAlexPosn (AlexPn offset line column) = TokenPos offset line column line
+type PosToken  = (Token, SourcePos)
+type AlexToken = Maybe PosToken
+
+alexEOF :: Alex AlexToken
+alexEOF = return Nothing
+
+lexSource :: String -> String -> Either String [PosToken]
+lexSource source input = runAlex input loop
+  where
+    loop = do tok <- alexMonadScan
+              case tok of
+                Nothing -> return []
+                Just x  -> let x' = addSource <$> x
+                           in fmap (x:) loop
+    addSource pos = pos { sourceName = source }
+
+tok :: (String -> Token) -> AlexInput -> Int -> Alex AlexToken
+tok f (pos, _, _, str) len = let
+  (AlexPn _ line col) = pos
+  tok  = f $ take len str
+  pos' = SourcePos "" line col (case tok of
+           TkNewline -> (1, 0)
+           _         -> (0, len))
+  in return $ Just (tok, pos')
 
 tokWhite   = tok $ const TkWhite
+tokNewline = tok $ const TkNewline
 tokComment = tok $ const TkComment
 
 tokId' :: (String -> Token) -> String -> Token
@@ -131,21 +167,15 @@ tokChar    = tok (TkLiteral . tokChar')
 tokString' = LString . readString
 tokString  = tok (TkLiteral . tokString')
 
-data Token = TkLiteral   Literal
-           | TkVarId     String
-           | TkVarSym    String
-           | TkConId     String
-           | TkConSym    String
-           | TkReserved  String
-           | TkLParen    ParenType
-           | TkRParen    ParenType
-           | TkWhite
-           | TkComment
-           | TkBacktick
-           | TkComma
-           | TkSemicolon
-           | TkEOF
-           deriving (Eq)
+reservedId :: String -> Bool
+reservedId id = id `elem` [ "let", "in", "where", "case", "of"
+                          , "if", "then", "else"
+                          , "infix", "infixl", "infixr"
+                          , "data", "type", "newtype", "_"
+                          , "class", "instance", "deriving" ]
+
+reservedOp :: String -> Bool
+reservedOp op = op `elem` [ "..", ":", "::", "=", "\\", "|", "<-", "->", "@", "~", "=>" ]
 
 instance Show Token where
   show (TkLiteral  (LInt    x)) = show x
@@ -164,44 +194,9 @@ instance Show Token where
   show (TkLParen   CurlyParen)  = "{"
   show (TkRParen   CurlyParen)  = "}"
   show TkWhite                  = " "
-  show TkComment                = "-- lorem ipsum\n"
+  show TkNewline                = "\n"
+  show TkComment                = "-- lorem ipsum"
   show TkBacktick               = "`"
   show TkComma                  = ","
   show TkSemicolon              = ";"
-  show TkEOF                    = ""
-
-data TokenPos = TokenPos
-              { tokenOffset :: Int
-              , tokenLine   :: Int
-              , tokenColumn :: Int
-              , tokenWidth  :: Int
-              } deriving (Eq, Show)
-
-type PosToken = (TokenPos, Token)
-
-data ParenType = CircleParen
-               | SquareParen
-               | CurlyParen
-               deriving (Eq, Show)
-
-reservedId :: String -> Bool
-reservedId id = id `elem` [ "let", "in", "where", "case", "of"
-                          , "if", "then", "else"
-                          , "infix", "infixl", "infixr"
-                          , "data", "type", "newtype", "_"
-                          , "class", "instance", "deriving" ]
-
-reservedOp :: String -> Bool
-reservedOp op = op `elem` [ "..", ":", "::", "=", "\\", "|", "<-", "->", "@", "~", "=>" ]
-
-
-lex :: String -> Either String [PosToken]
-lex input = runAlex input loop
-  where loop = do pt <- alexMonadScan
-                  case pt of
-                    (_, TkEOF) -> return [pt]
-                    otherwise  -> fmap (pt:) loop
-
-lexFile :: FilePath -> IO (Either String [PosToken])
-lexFile = fmap lex . readFile
 }

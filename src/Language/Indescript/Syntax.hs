@@ -46,6 +46,11 @@ data Literal = LInt    Int
              | LString String
              deriving (Eq, Show)
 
+data ParenType = CircleParen
+               | SquareParen
+               | CurlyParen
+               deriving (Eq, Show)
+
 data AssocType = Infix | InfixL | InfixR deriving (Eq, Show)
 data Fixity a  = Fixity a AssocType Int  deriving (Eq, Show, Functor)
 
