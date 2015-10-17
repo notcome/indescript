@@ -13,6 +13,12 @@ data SourcePos = SourcePos
                , contentSpan  :: (Int, Int)
                } deriving (Eq, Show)
 
+advanceSourcePos :: SourcePos -> SourcePos
+advanceSourcePos pos@(SourcePos _ line column (dl, dc)) =
+  pos { sourceLine   = line   + dl
+      , sourceColumn = column + dc
+      , contentSpan  = (0, 0) }
+
 instance Convertible SourcePos MP.SourcePos where
   convert pos = MP.newPos (sourceName   pos)
                           (sourceLine   pos)
