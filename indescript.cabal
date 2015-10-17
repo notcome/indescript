@@ -19,6 +19,7 @@ library
                      , Language.Indescript.Parser
                      , Language.Indescript.Syntax
                      , Language.Indescript.Parser.SourcePos
+                     , Data.Annotation
                      , Data.Convertible
   build-depends:       base >= 4.7 && < 5
                      , containers

@@ -1,8 +1,12 @@
 {
 {-# OPTIONS_GHC -fno-warn-tabs #-}
-module Language.Indescript.Parser.Lexer where
+module Language.Indescript.Parser.Lexer (
+  Token(..), ParenType(..), PosToken
+  ) where
 
 import Data.Char (toLower, readLitChar)
+
+import Text.Megaparsec.ShowToken
 
 import Language.Indescript.Syntax
 import Language.Indescript.Parser.SourcePos
@@ -167,6 +171,11 @@ tokChar    = tok (TkLiteral . tokChar')
 tokString' = LString . readString
 tokString  = tok (TkLiteral . tokString')
 
+data ParenType = CircleParen
+               | SquareParen
+               | CurlyParen
+               deriving (Eq, Show)
+
 reservedId :: String -> Bool
 reservedId id = id `elem` [ "let", "in", "where", "case", "of"
                           , "if", "then", "else"
@@ -199,4 +208,7 @@ instance Show Token where
   show TkBacktick               = "`"
   show TkComma                  = ","
   show TkSemicolon              = ";"
+
+instance ShowToken Token where
+  showToken = show
 }

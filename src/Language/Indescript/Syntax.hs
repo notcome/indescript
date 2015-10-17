@@ -1,56 +1,91 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Language.Indescript.Syntax where
 
-data Expr a = ELit   Literal a
-            | EVar   EVar a
-            | ECon   ECon a
-            | EApp   (Expr a) [Expr a] a
-            | EIf    (Expr a) (Expr a) (Expr a) a
-            | ECase  (Expr a) [Branch a] a
-            | ELam   [Pattern a] (Expr a) a
-            | ELet   [Supercomb a] (Expr a) a
-            | EWhere [Supercomb a] a
-            deriving (Eq, Show, Functor)
+import GHC.Generics
+import Data.Annotation
+
+data Literal = LInt    Int
+             | LFloat  Float
+             | LChar   Char
+             | LString String
+             | LUnit
+             deriving (Eq, Show)
+
+data EVar = EVVar String
+          | EVOp  String
+          deriving (Eq, Ord, Show)
+data EOp  = EOVar String
+          | EOOp  String
+          deriving (Eq, Ord, Show)
+
+data EAtom = ELit Literal
+           | EOp  EOp
+           | EVar EVar
+           deriving (Eq, Show)
+
+data Pattern a -- Atoms and Underscore
+               = PAtom    EAtom a
+               | PDiscard       a
+               -- Constructors and @-Binding
+               | PCon     (EVar, a) [Pattern a]             a
+               | PConOp   (EOp, a)  (Pattern a) (Pattern a) a
+               | PBinding (EVar, a) (Pattern a)             a
+               deriving (Eq, Show, Functor, Generic1)
+
+instance Annotation Pattern where
+  annotation = genericAnnotation
 
 data Branch a = Branch (Pattern a) (Expr a) a
-              deriving (Eq, Show, Functor)
+              deriving (Eq, Show, Functor, Generic1)
 
-data Pattern a = PLit Literal a
-               | PVar EVar a
-               | PCon ECon [Pattern a] a
-               | PAt  EVar (Pattern a) a
-               deriving (Eq, Show, Functor)
+instance Annotation Branch where
+  annotation = genericAnnotation
 
-data Supercomb a = Supercomb EVar [Pattern a] (Expr a) a
-                 deriving (Eq, Show, Functor)
+-- "Supercombinator" here only refers to functions with
+-- one or more cases.
+-- [Supercomb a] stands for where-binding.
+data Equation a  = EquFn (EVar, a) [Pattern a]             (Expr a) [Supercomb a] a
+                 | EquOp (EOp, a)  (Pattern a) (Pattern a) (Expr a) [Supercomb a] a
+                 deriving (Eq, Show, Functor, Generic1)
+type Supercomb a = [Equation a]
 
+instance Annotation Equation where
+  annotation = genericAnnotation
+
+data OpSecDir = SecLeft | SecRight deriving (Eq, Show)
+
+data Expr a = EAtom  EAtom a
+            -- Operator Section/Application, Function Application, If-Then-Else
+            | EOpSec (EOp, a) (Expr a) OpSecDir a
+            | EOpApp (EOp, a) (Expr a) (Expr a) a
+            | EApp   (Expr a) [Expr a]          a
+            | EIf    (Expr a) (Expr a) (Expr a) a
+            -- Case-Of
+            | ECase  (Expr a) [Branch a] a
+            -- Lambda
+            | ELam   [Pattern a] (Expr a) a
+            -- Let
+            | ELet   [Supercomb a] (Expr a) a
+            deriving (Eq, Show, Functor, Generic1)
+
+instance Annotation Expr where
+  annotation = genericAnnotation
+
+-- TODO: Redesign type repns.
 data Type = TLit    TVar
           | TVar    TVar
           | TCon    TCon
           | TApp    Type Type
           | TForall [TVar] Type
           deriving (Eq, Show)
-
-data EVar = EVStr String
-          | EVSym String
-          deriving (Eq, Ord, Show)
 data TVar = TVStr String
           | TVSym String
           deriving (Eq, Ord, Show)
-type ECon    = (EVar, Int)
 type TCon    = (TVar, Int)
 
-data Literal = LInt    Int
-             | LFloat  Float
-             | LChar   Char
-             | LString String
-             deriving (Eq, Show)
-
-data ParenType = CircleParen
-               | SquareParen
-               | CurlyParen
-               deriving (Eq, Show)
-
+-- TODO: Redesign those things' repns.
+{-
 data AssocType = Infix | InfixL | InfixR deriving (Eq, Show)
 data Fixity a  = Fixity a AssocType Int  deriving (Eq, Show, Functor)
 
@@ -61,6 +96,7 @@ data Decl a = FixityDecl   (Fixity a)    a
             | FuncDecl     (Supercomb a) a
             | DataTypeDecl (ADTDecl a)   a
             deriving (Eq, Show, Functor)
+-}
 
 purifyAST :: Functor f => f a -> f ()
 purifyAST = fmap $ const ()
