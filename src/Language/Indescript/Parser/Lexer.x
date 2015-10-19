@@ -1,7 +1,7 @@
 {
 {-# OPTIONS_GHC -fno-warn-tabs #-}
 module Language.Indescript.Parser.Lexer (
-  Token(..), ParenType(..), PosToken
+  Token(..), ParenType(..), PosToken, lexSource
   ) where
 
 import Data.Char (toLower, readLitChar)

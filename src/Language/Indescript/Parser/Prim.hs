@@ -70,3 +70,11 @@ instance (GetSourceRange a, GetSourceRange b) => GetSourceRange (a, b) where
 instance GetSourceRange a => GetSourceRange [a] where
   getSourceRange = foldl1 combine . map getSourceRange
     where combine l r = getSourceRange (l, r)
+
+instance (ShowToken a, ShowToken b) => ShowToken (a, b) where
+  showToken (a, b) = "(" ++ showToken a ++ ", " ++ showToken b ++ ")"
+
+instance (ShowToken a) => ShowToken [a] where
+  showToken []     = "[]"
+  showToken [x]    = "[" ++ showToken x ++ "]"
+  showToken (x:xs) = "[" ++ showToken x ++ concatMap ((", " ++) . showToken) xs ++ "]"

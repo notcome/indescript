@@ -10,6 +10,7 @@ module Language.Indescript.Parser where
 import Control.Applicative
 import Data.Annotation
 
+import           Text.Megaparsec.ShowToken
 import qualified Text.Megaparsec      as MP
 import           Text.Megaparsec.Prim (MonadParsec)
 
@@ -17,6 +18,18 @@ import Language.Indescript.Syntax
 import Language.Indescript.Parser.Prim
 import Language.Indescript.Parser.SourcePos
 import Language.Indescript.Parser.Lexer
+
+parse' parser src input = case lexSource src input of
+  (Left errMsg) -> Left $ show errMsg
+  (Right lexed) -> let lexed' = insertSemicolonBraces lexed
+    in case MP.parse parser src lexed' of
+      (Left errMsg)  -> Left $ show errMsg
+      (Right parsed) -> Right parsed
+  where
+    -- TODO: implement the semicolon brace insertion algorithm
+    insertSemicolonBraces = id
+
+parse = parse' pAtom
 
 type PPattern = Pattern SourcePos
 type PExpr    = Expr    SourcePos

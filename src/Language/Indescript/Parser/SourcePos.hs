@@ -2,7 +2,8 @@
 module Language.Indescript.Parser.SourcePos where
 
 import           Data.Convertible
-import qualified Text.Megaparsec.Pos as MP
+import qualified Text.Megaparsec.Pos       as MP
+import           Text.Megaparsec.ShowToken
 
 data SourcePos = SourcePos
                { sourceName   :: String
@@ -12,6 +13,9 @@ data SourcePos = SourcePos
                -- so it is necessary to record the span of this token.
                , contentSpan  :: (Int, Int)
                } deriving (Eq, Show)
+
+instance ShowToken SourcePos where
+  showToken = show
 
 advanceSourcePos :: SourcePos -> SourcePos
 advanceSourcePos pos@(SourcePos _ line column (dl, dc)) =
