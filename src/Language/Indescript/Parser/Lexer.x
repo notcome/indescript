@@ -93,6 +93,8 @@ data Token = TkLiteral   Literal
            | TkBacktick
            | TkComma
            | TkSemicolon
+           | TkIndentA   Int
+           | TkIndentB   Int
            deriving (Eq)
 
 type PosToken  = (Token, SourcePos)
@@ -208,6 +210,7 @@ instance Show Token where
   show TkBacktick               = "`"
   show TkComma                  = ","
   show TkSemicolon              = ";"
+  show _                        = ""
 
 instance ShowToken Token where
   showToken = show

@@ -19,6 +19,81 @@ import Language.Indescript.Parser.Prim
 import Language.Indescript.Parser.SourcePos
 import Language.Indescript.Parser.Lexer
 
+stripWhite :: [PosToken] -> [PosToken]
+stripWhite = filter notWhite
+  where notWhite (TkWhite,   _) = False
+        notWhite (TkNewline, _) = False
+        notWhite (TkComment, _) = False
+
+layout :: [PosToken] -> Maybe [PosToken]
+layout = flip resolveLayout [] . insertIndents
+  where
+    eta :: Token -> PosToken
+    eta = flip (,) undefined
+
+    isBlockStart (TkReserved t, _) = t `elem` ["let", "where", "do", "of"]
+
+    insertedIndent (t:ts)
+      | isBlockStart t, [] <- ts = [eta $ TkIndentA 0]
+      | isBlockStart t, ((_, pos):_) <- ts
+                                 = [eta $ TkIndentA $ sourceColumn pos]
+    insertedIndent ((_, p1):(_, p2):ts)
+      | sourceColumn p1 < sourceColumn p2
+                                 = [eta $ TkIndentB $ sourceColumn p2]
+    insertedIndent _             = []
+
+    insertIndents []     = []
+    insertIndents (t:ts) = t:(insertedIndent (t:ts) ++ insertIndents ts)
+
+    semicolon = eta   TkSemicolon
+    lbrace    = eta $ TkLParen CurlyParen
+    rbrace    = eta $ TkRParen CurlyParen
+
+    -- A direct translation of the layout algorithm presented
+    -- in Haskell 2010 Language Report
+    resolveLayout :: [PosToken] -> [Int] -> Maybe [PosToken]
+    -- L (<n>:ts) (m:ms) = ; : (L ts (m:ms))   if m = n
+    --                   = } : (L (<n>):ts ms) if n < m
+    -- L (< n >: ts) ms  = L ts ms
+    resolveLayout tts@((TkIndentB n, _):ts) (m:ms)
+      | m == n = (semicolon:) <$> resolveLayout ts  (m:ms)
+      | n < m  = (rbrace:)    <$> resolveLayout tts ms
+    resolveLayout ((TkIndentB _, _):ts) ms
+                                = resolveLayout ts  ms
+
+    -- L ({n}:ts) (m:ms) = { : (L ts (n:m:ms)) if n > m
+    -- L ({n}:ts) []     = { : (L ts [n])      if n > 0
+    -- L ({n}:ts) ms     = { : } : (L (<n>:ts) ms)
+    resolveLayout ((TkIndentA n, _):ts) (m:ms)
+      | n > m  = (lbrace:)    <$> resolveLayout ts  (n:m:ms)
+    resolveLayout ((TkIndentA n, _):ts) []
+      | n > 0  = resolveLayout ts  [n]
+    resolveLayout ((TkIndentA n, _):ts) ms = do
+        rest <- resolveLayout ((eta $ TkIndentB n):ts) ms
+        return $ (lbrace):(rbrace):rest
+
+    -- L (}:ts) (0:ms) = } : (L ts ms)
+    -- L (}:ts) ms     = parse-error
+    -- L ({:ts) ms     = { : (L ts (0:ms))
+    -- L (t:ts) (m:ms) = } : (L (t:ts) ms) if m ≠ 0 and parse-error(t)
+    -- What does it mean by "parse-error(t)"
+    resolveLayout ((TkRParen CurlyParen, _):ts) (0:ms)
+               = (rbrace:)    <$> resolveLayout ts  ms
+    resolveLayout ((TkRParen CurlyParen, _):ts) ms = Nothing
+    resolveLayout ((TkLParen CurlyParen, _):ts) ms
+               = (lbrace:)    <$> resolveLayout ts  (0:ms)
+    resolveLayout tts@(t:ts) (m:ms)
+      | m /= 0 = (rbrace:)    <$> resolveLayout tts ms
+
+    -- L (t:ts) ms = t : (L ts ms)
+    -- L []     [] = []
+    -- L [] (m:ms) = } : (L [] ms) if m≠0
+    resolveLayout (t:ts) ms = (t:) <$> resolveLayout ts ms
+    resolveLayout []     [] = Just []
+    resolveLayout [] (m:ms)
+      | m /= 0 = (rbrace:)    <$> resolveLayout [] ms
+    resolveLayout _      _  = Nothing
+
 parse' parser src input = case lexSource src input of
   (Left errMsg) -> Left $ show errMsg
   (Right lexed) -> let lexed' = insertSemicolonBraces lexed
