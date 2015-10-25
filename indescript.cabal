@@ -16,6 +16,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     Language.Indescript.ADT
                      , Language.Indescript.TypeInference
+                     , Language.Indescript.Parser.Lexer
                      , Language.Indescript.Parser
                      , Language.Indescript.Syntax
                      , Language.Indescript.Parser.SourcePos
@@ -27,8 +28,9 @@ library
                      , mtl
                      , array
                      , megaparsec
-  build-tools:         alex
-  other-modules:       Language.Indescript.Parser.Lexer
+                     , regex-applicative
+--  build-tools:         alex
+--  other-modules:       Language.Indescript.Parser.Lexer
   default-language:    Haskell2010
 
 executable indescript-exe

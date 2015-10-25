@@ -12,6 +12,12 @@ data Literal = LInt    Int
              | LUnit
              deriving (Eq, Show)
 
+data Variable = VarId  String
+              | ConId  String
+              | VarSym String
+              | ConSym String
+              deriving (Eq, Show)
+
 data EVar = EVVar String
           | EVOp  String
           deriving (Eq, Ord, Show)
