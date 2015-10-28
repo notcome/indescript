@@ -8,6 +8,7 @@ import Data.Char              (ord)
 import Text.Regex.Applicative
 
 import Language.Indescript.Syntax
+import Language.Indescript.Parser.Pos
 
 --    # Charsets
 --   ## Number Charsets
@@ -237,8 +238,6 @@ layout [] (m:ms)
   | m /= 0 = (rbrace:) <$> layout [] ms
 layout _  _  = impossible
 
-fakePos :: LCWPos
-fakePos = (-1, -1, 0)
 semicolon = (TkRsv ":", fakePos)
 lbrace    = (TkRsv "{", fakePos)
 rbrace    = (TkRsv "}", fakePos)
@@ -273,20 +272,6 @@ data Trigger = TrString
              | TrWhite Int
              | TrLine
              deriving (Eq, Show)
-
-type Width  = Int
-type LCPos  = (Int, Int)
-type LCWPos = (Int, Int, Int)
-
--- TODO: move to Language.Indescript.Parser.SourcePos
-data SourcePos = SourcePos
-               { sourceLine   :: Int
-               , sourceColumn :: Int
-               , contentWidth :: Int
-               , nextTokenPos :: SourcePos
-               } deriving (Eq, Show)
-
-fromLCWPos (l, c, w) next = SourcePos l c w next
 
 --   ## Help Functions
 lexIndescript :: String -> Maybe [(Token, SourcePos)]
