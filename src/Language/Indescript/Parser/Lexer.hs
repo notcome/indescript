@@ -54,13 +54,13 @@ pOct = some cOctit
 pDec = some cDigit
 pHex = some cHexit
 
-pInteger :: RE Char (Literal, Width)
+pInteger :: RE Char (Literal, Int)
 pInteger =  (string "0b" <|> string "0B") *> fmap (from 2)  pBin
         <|> (string "0o" <|> string "0o") *> fmap (from 8)  pOct
         <|> (string "0x" <|> string "0x") *> fmap (from 16) pHex
         <|> fmap (from 10) pDec
   where
-    from :: Int -> String -> (Literal, Width)
+    from :: Int -> String -> (Literal, Int)
     from base s = (LInt $ fold base s, length s)
 
     fold :: Int -> String -> Int
@@ -75,7 +75,7 @@ pInteger =  (string "0b" <|> string "0B") *> fmap (from 2)  pBin
        <|> (+10) <$> try 'a' 6
       in case x of Just x' -> x'; Nothing -> impossible
 
-pFloat :: RE Char (Literal, Width)
+pFloat :: RE Char (Literal, Int)
 pFloat = let str = pDec <++> string "." <++> pDec
          in fmap ((,) <$> LFloat . read <*> length) str
 
@@ -95,7 +95,7 @@ tChar         = string "'"
 tBlockComment = string "{-"
 
 --    # Rules
-type TokenResult = Either Trigger (Token, Width)
+type TokenResult = Either Trigger (Token, Int)
 token :: RE Char TokenResult
 token = triggers <|> right vars <|> right lits <|> right pncs
   where
@@ -128,12 +128,12 @@ token = triggers <|> right vars <|> right lits <|> right pncs
 
     pncs = flip fmap pSpecial $ fmap (, 1) TkPnc
 
-    white = (Left . TrWhite . toWidth) <$> some cWhite
+    white = (Left . TrWhite . toInt) <$> some cWhite
       where
-        toWidth = sum . map getWidth
-        getWidth ' '  = 1
-        getWidth '\t' = 4
-        getWidth _    = impossible
+        toInt = sum . map getInt
+        getInt ' '  = 1
+        getInt '\t' = 4
+        getInt _    = impossible
 
 tokens :: String -> SourcePoint -> Maybe [(Token, ElemPos)]
 tokens "" _ = Just []
@@ -143,16 +143,16 @@ tokens s  pnt = case findLongestPrefix token s of
     in fmap ((t, pos):) $ tokens s' $ endPoint pos
   Just (Left trigger, s') -> case trigger of
     TrWhite w -> tokens s' $ incCol w pnt
-    TrLine    -> tokens s' $ SourcePoint (1 + srcRow, 0)
+    TrLine    -> tokens s' $ SourcePoint (1 + srcRow pnt, 0)
     _         -> error "not supported yet"
   Nothing -> Nothing
 
-lexTokens :: String -> Maybe [(Token, LCWPos)]
-lexTokens = flip tokens (0, 0)
+lexTokens :: String -> Maybe [(Token, ElemPos)]
+lexTokens = flip tokens $ SourcePoint (0, 0)
 
 --    # Postprocessing
 --   ## Layout Resolution
-resolveLayout :: [(Token, LCWPos)] -> Maybe [(Token, LCWPos)]
+resolveLayout :: [(Token, ElemPos)] -> Maybe [(Token, ElemPos)]
 resolveLayout = flip layout [] . insertIndents
 
 --  ### Insert Indents
@@ -160,7 +160,7 @@ data Indent = NextLv Int
             | SameLv Int
             deriving (Eq, Show)
 
-insertIndents :: [(Token, LCWPos)] -> [Either Indent (Token, LCWPos)]
+insertIndents :: [(Token, ElemPos)] -> [Either Indent (Token, ElemPos)]
 insertIndents []     = []
 insertIndents (tok:toks) = case indent (tok:toks) of
   Just x  -> Right tok : Left x : insertIndents toks
@@ -169,18 +169,20 @@ insertIndents (tok:toks) = case indent (tok:toks) of
     isBlockStart (TkRsv s, _) = s `elem` ["let", "where", "do", "of"]
     isBlockStart _            = False
 
+    indent :: [(Token, ElemPos)] -> Maybe Indent
     indent (t:ts)
-      | isBlockStart t, [] <- ts = Just $ NextLv 0
-      | isBlockStart t, ((_, (_, c, _)):_) <- ts
-                                 = Just $ NextLv c
-    indent ((_, (l1, _, _)):(_, (l2, c, _)):_)
-      | l1 < l2                  = Just $ SameLv c
+      | isBlockStart t, [] <- ts  = Just $ NextLv 0
+      | isBlockStart t, ((_, p) : _) <- ts
+                                  = Just $ NextLv $ startCol p
+
+    indent ((_, p1) : (_, p2) : _)
+      | startRow p1 < startRow p2 = Just $ SameLv $ startCol p2
     indent _ = Nothing
 
 --  ### Layout Algorithm
 -- A direct translation of the layout algorithm presented
 -- in the Haskell 2010 Language Report.
-layout :: [Either Indent (Token, LCWPos)] -> [Int] -> Maybe [(Token, LCWPos)]
+layout :: [Either Indent (Token, ElemPos)] -> [Int] -> Maybe [(Token, ElemPos)]
 -- L (<n>:ts) (m:ms) = ; : (L ts (m:ms))   if m = n
 --                   = } : (L (<n>):ts ms) if n < m
 -- L (<n>:ts) ms     = L ts ms
@@ -224,35 +226,28 @@ layout [] (m:ms)
   | m /= 0 = (rbrace:) <$> layout [] ms
 layout _  _  = impossible
 
-fakePos :: LCWPos
-fakePos = (-1, -1, -1)
-
-semicolon = (TkRsv ";", fakePos)
-lbrace    = (TkRsv "{", fakePos)
-rbrace    = (TkRsv "}", fakePos)
+semicolon = (TkRsv ";", nullPos pesudoPoint Nothing)
+lbrace    = (TkRsv "{", nullPos pesudoPoint Nothing)
+rbrace    = (TkRsv "}", nullPos pesudoPoint Nothing)
 
 --   ## Position Resolution
 resolvePosition :: [(Token, ElemPos)] -> [(Token, ElemPos)]
 resolvePosition = fst . resolve
   where
     resolve :: [(Token, ElemPos)] -> ([(Token, ElemPos)], ElemPos)
-    resolve []         = ([], ElemPos pesudoPoint zeroSpan Nothing)
-    resolve (x1:x2:xs)
-      | fst t2 == TkRsv ";" | fst t2 == TkRsv "}"
-      , (t1, p1) <- x1, (t2, p2) <- x2, (ts, ps) <- xs = let
-        (xs', ps') = resolve (ts)
-        p2'        = ElemPos (endPoint t1) zeroSpan ps'
-        p1'        = p1 { nextElem = p2' }
-        in ((t1, p1'):(t2, p2'):xs', p1')
-
-
-    resolve ((t, p):ts) = let
-      (ts', next) = resolve ts
-      -- TODO: consider a better way to assign position to implicit tokens.
-      this        = if p == fakePos
-                    then next { nextTokenPos = next }
-                    else fromLCWPos p next
-      in ((t, this) : ts', this)
+    resolve []         = ([], nullPos pesudoPoint Nothing)
+    resolve ((t1, p1) : (t2, _) : xs)
+      | elem t2 $ map TkRsv [";", "{", "}"] = let
+        (xs', ps') = resolve xs
+        p2'        = nullPos (if t2 == TkRsv "{"
+                              then startPoint ps'
+                              else endPoint   p1) (Just ps')
+        p1'        = p1 { nextElem = Just p2' }
+        in ((t1, p1') : (t2, p2') : xs', p1')
+    resolve ((t, p):xs) = let
+      (ts', ps') = resolve xs
+      p'         = p { nextElem = Just ps' }
+      in ((t, p') : ts', p')
 
 --    # Interface
 --   ## Interface Datatypes
@@ -286,10 +281,6 @@ data Trigger = TrString
              | TrWhite Int
              | TrLine
              deriving (Eq, Show)
-
-type Width  = Int
-type LCPos  = (Int, Int)
-type LCWPos = (Int, Int, Int)
 
 unlinkedPos :: SourcePoint -> SourceSpan -> ElemPos
 unlinkedPos p s = ElemPos p s Nothing

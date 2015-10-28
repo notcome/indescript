@@ -6,7 +6,6 @@ newtype SourcePoint = SourcePoint { unSourcePoint :: (Int, Int) }
 pesudoPoint :: SourcePoint
 pesudoPoint = SourcePoint (-1, -1)
 
-
 srcRow :: SourcePoint -> Int
 srcRow = fst . unSourcePoint
 srcCol :: SourcePoint -> Int
@@ -40,6 +39,11 @@ endPoint (ElemPos p d _) = let
   (r0, c0) = unSourcePoint p
   (dr, dc) = unSourceSpan  d
   in SourcePoint (r0 + dr, c0 + dc)
+
+startRow :: ElemPos -> Int
+startRow = srcRow . startPoint
+startCol :: ElemPos -> Int
+startCol = srcCol . startPoint
 
 nullPos :: SourcePoint -> Maybe ElemPos -> ElemPos
 nullPos = flip ElemPos zeroSpan
