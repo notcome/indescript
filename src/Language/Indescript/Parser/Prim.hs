@@ -14,7 +14,7 @@ import           Text.Megaparsec.Prim      (MonadParsec)
 import           Text.Megaparsec.ShowToken
 
 import Language.Indescript.Syntax
-import Language.Indescript.Parser.SourcePos
+import Language.Indescript.Parser.Pos
 import Language.Indescript.Parser.Lexer
 
 nextToken :: MonadParsec s m PosToken

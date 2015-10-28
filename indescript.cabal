@@ -16,10 +16,10 @@ library
   hs-source-dirs:      src
   exposed-modules:     Language.Indescript.ADT
                      , Language.Indescript.TypeInference
+                     , Language.Indescript.Parser.Pos
                      , Language.Indescript.Parser.Lexer
                      , Language.Indescript.Parser
                      , Language.Indescript.Syntax
-                     , Language.Indescript.Parser.SourcePos
                      , Language.Indescript.Parser.Prim
                      , Data.Annotation
                      , Data.Convertible

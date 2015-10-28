@@ -135,29 +135,15 @@ token = triggers <|> right vars <|> right lits <|> right pncs
         getWidth '\t' = 4
         getWidth _    = impossible
 
--- TODO: add escape charaters support.
--- TODO: add multiline string support.
-cpsPString :: String -> LCPos -> Maybe [(Token, LCWPos)]
-cpsPString s (l, c) = case findLongestPrefix pString s of
-  Just (str, s') -> let
-    w  = length str + 2
-    t  = TkLit $ LString str
-    t' = (t, (l, c, w))
-    ts = tokens s' (l, c + w)
-    in fmap (t':) ts
-  Nothing -> Nothing
-  where
-    pString = sym '"' *> many (psym $ \x -> x /= '"') <* sym '"'
-
-tokens :: String -> LCPos -> Maybe [(Token, LCWPos)]
-tokens "" _      = Just []
-tokens s  (l, c) = case findLongestPrefix token s of
-  Just (Right (t, w), s') ->
-    fmap ((t, (l, c, w)):) $ tokens s' (l, c + w)
+tokens :: String -> SourcePoint -> Maybe [(Token, ElemPos)]
+tokens "" _ = Just []
+tokens s  pnt = case findLongestPrefix token s of
+  Just (Right (t, w), s') -> let
+    pos = unlinkedPos pnt (SourceSpan (0, w))
+    in fmap ((t, pos):) $ tokens s' $ endPoint pos
   Just (Left trigger, s') -> case trigger of
-    TrWhite w -> tokens s' (l, c + w)
-    TrLine    -> tokens s' (l + 1, 0)
-    TrString  -> cpsPString s (l, c)
+    TrWhite w -> tokens s' $ incCol w pnt
+    TrLine    -> tokens s' $ SourcePoint (1 + srcRow, 0)
     _         -> error "not supported yet"
   Nothing -> Nothing
 
@@ -238,16 +224,28 @@ layout [] (m:ms)
   | m /= 0 = (rbrace:) <$> layout [] ms
 layout _  _  = impossible
 
-semicolon = (TkRsv ":", fakePos)
+fakePos :: LCWPos
+fakePos = (-1, -1, -1)
+
+semicolon = (TkRsv ";", fakePos)
 lbrace    = (TkRsv "{", fakePos)
 rbrace    = (TkRsv "}", fakePos)
 
 --   ## Position Resolution
-resolvePosition :: [(Token, LCWPos)] -> [(Token, SourcePos)]
+resolvePosition :: [(Token, ElemPos)] -> [(Token, ElemPos)]
 resolvePosition = fst . resolve
   where
-    resolve :: [(Token, LCWPos)] -> ([(Token, SourcePos)], SourcePos)
-    resolve []          = ([], fromLCWPos fakePos undefined)
+    resolve :: [(Token, ElemPos)] -> ([(Token, ElemPos)], ElemPos)
+    resolve []         = ([], ElemPos pesudoPoint zeroSpan Nothing)
+    resolve (x1:x2:xs)
+      | fst t2 == TkRsv ";" | fst t2 == TkRsv "}"
+      , (t1, p1) <- x1, (t2, p2) <- x2, (ts, ps) <- xs = let
+        (xs', ps') = resolve (ts)
+        p2'        = ElemPos (endPoint t1) zeroSpan ps'
+        p1'        = p1 { nextElem = p2' }
+        in ((t1, p1'):(t2, p2'):xs', p1')
+
+
     resolve ((t, p):ts) = let
       (ts', next) = resolve ts
       -- TODO: consider a better way to assign position to implicit tokens.
@@ -256,25 +254,18 @@ resolvePosition = fst . resolve
                     else fromLCWPos p next
       in ((t, this) : ts', this)
 
---    # Datatypes and Helper Functions
---   ## Datatypes
+--    # Interface
+--   ## Interface Datatypes
 data Token = TkLit Literal
            | TkVar Variable
            | TkRsv String
            | TkPnc Char
            deriving (Eq)
 
-type PosedToken = (Token, SourcePos)
+type PosedToken = (Token, ElemPos)
 
-data Trigger = TrString
-             | TrChar
-             | TrComment
-             | TrWhite Int
-             | TrLine
-             deriving (Eq, Show)
-
---   ## Help Functions
-lexIndescript :: String -> Maybe [(Token, SourcePos)]
+--   ## Interface Functions
+lexIndescript :: String -> Maybe [(Token, ElemPos)]
 lexIndescript src = lexTokens src >>= resolveLayout >>= (pure . resolvePosition)
 
 --    # Regex.Applicative combinator extension
@@ -287,5 +278,21 @@ symClass cls = psym (\x -> x `elem` cls)
 infixr <++>
 infixr <:>
 
---    # TODO: Move to a general module.
+--    # Helper Datatypes and Funcitons
+
+data Trigger = TrString
+             | TrChar
+             | TrComment
+             | TrWhite Int
+             | TrLine
+             deriving (Eq, Show)
+
+type Width  = Int
+type LCPos  = (Int, Int)
+type LCWPos = (Int, Int, Int)
+
+unlinkedPos :: SourcePoint -> SourceSpan -> ElemPos
+unlinkedPos p s = ElemPos p s Nothing
+
+-- TODO: Move to a general module.
 impossible = error "Confident impossibility."

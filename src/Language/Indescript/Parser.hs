@@ -16,7 +16,7 @@ import           Text.Megaparsec.Prim (MonadParsec)
 
 import Language.Indescript.Syntax
 import Language.Indescript.Parser.Prim
-import Language.Indescript.Parser.SourcePos
+import Language.Indescript.Parser.Pos
 import Language.Indescript.Parser.Lexer
 
 stripWhite :: [PosToken] -> [PosToken]
