@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds     #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 module Language.Indescript.Syntax where
@@ -18,6 +19,23 @@ data Variable = VarId  String
               | ConSym String
               deriving (Eq, Show)
 
+data Expr a = ELam a
+            | ELet a
+            | EIf  a
+            | ECase a
+            | EApp (Expr a) [Expr a] a
+            | EVar Variable a
+            | ECon Variable a
+            | EOp  Variable a
+            | ELit Literal  a
+            | EList a
+            | ETuple a
+            | ELOpSec (Expr a) (Expr a) a
+            | EROpSec (Expr a) (Expr a) a
+            | EInfix  (Expr a) (Expr a) (Expr a) a
+            | ENeg    (Expr a) a
+            deriving (Eq, Show, Functor, Generic1)
+
 data EVar = EVVar String
           | EVOp  String
           deriving (Eq, Ord, Show)
@@ -25,10 +43,7 @@ data EOp  = EOVar String
           | EOOp  String
           deriving (Eq, Ord, Show)
 
-data EAtom = ELit Literal
-           | EOp  EOp
-           | EVar EVar
-           deriving (Eq, Show)
+data EAtom = A deriving (Eq, Show)
 
 data Pattern a -- Atoms and Underscore
                = PAtom    EAtom a
@@ -61,6 +76,7 @@ instance Annotation Equation where
 
 data OpSecDir = SecLeft | SecRight deriving (Eq, Show)
 
+{-
 data Expr a = EAtom  EAtom a
             -- Operator Section/Application, Function Application, If-Then-Else
             | EOpSec (EOp, a) (Expr a) OpSecDir a
@@ -74,6 +90,7 @@ data Expr a = EAtom  EAtom a
             -- Let
             | ELet   [Supercomb a] (Expr a) a
             deriving (Eq, Show, Functor, Generic1)
+-}
 
 instance Annotation Expr where
   annotation = genericAnnotation
@@ -104,5 +121,8 @@ data Decl a = FixityDecl   (Fixity a)    a
             deriving (Eq, Show, Functor)
 -}
 
+updateAST :: Functor f => b -> f a -> f b
+updateAST x' = fmap $ const x'
+
 purifyAST :: Functor f => f a -> f ()
-purifyAST = fmap $ const ()
+purifyAST = updateAST ()

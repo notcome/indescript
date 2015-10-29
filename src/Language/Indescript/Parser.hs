@@ -19,81 +19,7 @@ import Language.Indescript.Parser.Prim
 import Language.Indescript.Parser.Pos
 import Language.Indescript.Parser.Lexer
 
-stripWhite :: [PosToken] -> [PosToken]
-stripWhite = filter notWhite
-  where notWhite (TkWhite,   _) = False
-        notWhite (TkNewline, _) = False
-        notWhite (TkComment, _) = False
-
-layout :: [PosToken] -> Maybe [PosToken]
-layout = flip resolveLayout [] . insertIndents
-  where
-    eta :: Token -> PosToken
-    eta = flip (,) undefined
-
-    isBlockStart (TkReserved t, _) = t `elem` ["let", "where", "do", "of"]
-
-    insertedIndent (t:ts)
-      | isBlockStart t, [] <- ts = [eta $ TkIndentA 0]
-      | isBlockStart t, ((_, pos):_) <- ts
-                                 = [eta $ TkIndentA $ sourceColumn pos]
-    insertedIndent ((_, p1):(_, p2):ts)
-      | sourceColumn p1 < sourceColumn p2
-                                 = [eta $ TkIndentB $ sourceColumn p2]
-    insertedIndent _             = []
-
-    insertIndents []     = []
-    insertIndents (t:ts) = t:(insertedIndent (t:ts) ++ insertIndents ts)
-
-    semicolon = eta   TkSemicolon
-    lbrace    = eta $ TkLParen CurlyParen
-    rbrace    = eta $ TkRParen CurlyParen
-
-    -- A direct translation of the layout algorithm presented
-    -- in Haskell 2010 Language Report
-    resolveLayout :: [PosToken] -> [Int] -> Maybe [PosToken]
-    -- L (<n>:ts) (m:ms) = ; : (L ts (m:ms))   if m = n
-    --                   = } : (L (<n>):ts ms) if n < m
-    -- L (< n >: ts) ms  = L ts ms
-    resolveLayout tts@((TkIndentB n, _):ts) (m:ms)
-      | m == n = (semicolon:) <$> resolveLayout ts  (m:ms)
-      | n < m  = (rbrace:)    <$> resolveLayout tts ms
-    resolveLayout ((TkIndentB _, _):ts) ms
-                                = resolveLayout ts  ms
-
-    -- L ({n}:ts) (m:ms) = { : (L ts (n:m:ms)) if n > m
-    -- L ({n}:ts) []     = { : (L ts [n])      if n > 0
-    -- L ({n}:ts) ms     = { : } : (L (<n>:ts) ms)
-    resolveLayout ((TkIndentA n, _):ts) (m:ms)
-      | n > m  = (lbrace:)    <$> resolveLayout ts  (n:m:ms)
-    resolveLayout ((TkIndentA n, _):ts) []
-      | n > 0  = resolveLayout ts  [n]
-    resolveLayout ((TkIndentA n, _):ts) ms = do
-        rest <- resolveLayout ((eta $ TkIndentB n):ts) ms
-        return $ (lbrace):(rbrace):rest
-
-    -- L (}:ts) (0:ms) = } : (L ts ms)
-    -- L (}:ts) ms     = parse-error
-    -- L ({:ts) ms     = { : (L ts (0:ms))
-    -- L (t:ts) (m:ms) = } : (L (t:ts) ms) if m ≠ 0 and parse-error(t)
-    -- What does it mean by "parse-error(t)"
-    resolveLayout ((TkRParen CurlyParen, _):ts) (0:ms)
-               = (rbrace:)    <$> resolveLayout ts  ms
-    resolveLayout ((TkRParen CurlyParen, _):ts) ms = Nothing
-    resolveLayout ((TkLParen CurlyParen, _):ts) ms
-               = (lbrace:)    <$> resolveLayout ts  (0:ms)
-    resolveLayout tts@(t:ts) (m:ms)
-      | m /= 0 = (rbrace:)    <$> resolveLayout tts ms
-
-    -- L (t:ts) ms = t : (L ts ms)
-    -- L []     [] = []
-    -- L [] (m:ms) = } : (L [] ms) if m≠0
-    resolveLayout (t:ts) ms = (t:) <$> resolveLayout ts ms
-    resolveLayout []     [] = Just []
-    resolveLayout [] (m:ms)
-      | m /= 0 = (rbrace:)    <$> resolveLayout [] ms
-    resolveLayout _      _  = Nothing
-
+{-
 parse' parser src input = case lexSource src input of
   (Left errMsg) -> Left $ show errMsg
   (Right lexed) -> let lexed' = insertSemicolonBraces lexed
@@ -109,14 +35,14 @@ parse = parse' pAtom
 type PPattern = Pattern SourcePos
 type PExpr    = Expr    SourcePos
 
-pAtom :: MonadParsec s m PosToken => m PExpr
+pAtom :: MonadParsec s m PosedToken => m PExpr
 pAtom = pIf <|> pLit <|> pVar <|> pLam <|> pCase <|> pParened -- pLet <|>
 
-pParened :: MonadParsec s m PosToken => m PExpr
+pParened :: MonadParsec s m PosedToken => m PExpr
 pParened = do (_, sp) <- lparen <* space
               (e, fl) <- resolve =<< MP.many (pAtom' <* space)
               (_, ep) <- space *> rparen
-              if fl then return $ fmap (const $ getSourceRange (sp, ep)) e
+              if fl then return $ fmap (const $ elemPos (sp, ep)) e
                     else return e
   where
     pAtom' = nakedOp <|> pAtom
@@ -140,7 +66,7 @@ pParened = do (_, sp) <- lparen <* space
         build' xs     = let (lhs, op_rhs) = break isOp xs in build lhs op_rhs
         appFn  []     = error "Impossible happens!"
         appFn  [f]    = return f
-        appFn  (f:xs) = return $ EApp f xs $ getSourceRange (f:xs)
+        appFn  (f:xs) = return $ EApp f xs $ elemPos (f:xs)
 
         build []  []       = error "Impossible happens!"
         build []  (op:_)   = fail $ "Left operand not found at "  ++ (show . annotation) op
@@ -149,39 +75,39 @@ pParened = do (_, sp) <- lparen <* space
         build lhs (op:rhs) = do
           lhs' <- appFn  lhs
           rhs' <- build' rhs
-          return $ EApp op [lhs', rhs'] $ getSourceRange (lhs', rhs')
+          return $ EApp op [lhs', rhs'] $ elemPos (lhs', rhs')
 
-pIf :: MonadParsec s m PosToken => m PExpr
+pIf :: MonadParsec s m PosedToken => m PExpr
 pIf = do (_, sp) <- reserved "if"   <* space
          cond    <- pAtom <* space
          _       <- reserved "then" <* space
          exp1    <- pAtom <* space
          _       <- reserved "else" <* space
          exp2    <- pAtom
-         return $ EIf cond exp1 exp2 $ getSourceRange (sp, [exp1, exp2])
+         return $ EIf cond exp1 exp2 $ elemPos (sp, [exp1, exp2])
 
-pLam :: MonadParsec s m PosToken => m PExpr
+pLam :: MonadParsec s m PosedToken => m PExpr
 pLam = do (_, sp) <- reserved "\\" <* space
           px      <- pPattern
           pxs     <- MP.many (space *> pPattern)
           space *> reserved "->" <* space
           expr    <- pAtom
-          return $ ELam (px:pxs) expr $ getSourceRange (sp, expr)
+          return $ ELam (px:pxs) expr $ elemPos (sp, expr)
 
 -- TODO: insert semicolon and braces
-pCase :: MonadParsec s m PosToken => m PExpr
+pCase :: MonadParsec s m PosedToken => m PExpr
 pCase = do (_, sp) <- reserved "case" <* space
            expr    <- pAtom <* space
            reserved "of" >> space >> lbrace >> space
            brchs   <- MP.many (branch <* space <* token TkSemicolon <* space)
            (_, ep) <- space *> rbrace
-           return $ ECase expr brchs $ getSourceRange (sp, ep)
+           return $ ECase expr brchs $ elemPos (sp, ep)
   where branch = do pat <- pPattern
                     space *> reserved "->" <* space
                     expr <- pAtom
-                    return $ Branch pat expr $ getSourceRange (pat, expr)
+                    return $ Branch pat expr $ elemPos (pat, expr)
 
-nodify :: MonadParsec s m PosToken
+nodify :: MonadParsec s m PosedToken
        => m (a, SourcePos)
        -> (a -> SourcePos -> b)
        -> m b
@@ -190,13 +116,13 @@ nodify parser con = do (x, pos) <- parser; return $ con x pos
 pLit = nodify pELit  EAtom
 pVar = nodify pEVVar EAtom
 
-pELit :: MonadParsec s m PosToken => m (EAtom, SourcePos)
+pELit :: MonadParsec s m PosedToken => m (EAtom, SourcePos)
 pELit = do (TkLiteral lit, pos) <- satisfy isLiteral
            return (ELit lit, pos)
   where isLiteral (TkLiteral _) = True
         isLiteral _             = False
 
-pEVVar :: MonadParsec s m PosToken => m (EAtom, SourcePos)
+pEVVar :: MonadParsec s m PosedToken => m (EAtom, SourcePos)
 pEVVar = do (tok, pos) <- satisfy isVarCon
             let atom = case tok of TkVarId x -> x
                                    TkConId x -> x
@@ -206,7 +132,7 @@ pEVVar = do (tok, pos) <- satisfy isVarCon
         isVarCon (TkConId _) = True
         isVarCon _           = False
 
-pEOp :: MonadParsec s m PosToken => m (EOp, SourcePos)
+pEOp :: MonadParsec s m PosedToken => m (EOp, SourcePos)
 pEOp = sym <|> var
   where
     isSymbol (TkVarSym _) = True
@@ -223,9 +149,9 @@ pEOp = sym <|> var
     var = do (_, sp) <- backtick <* space'
              (EVar (EVVar tok), _) <- pEVVar
              (_, ep) <- space' *> backtick
-             return (EOVar tok, getSourceRange (sp, ep))
+             return (EOVar tok, elemPos (sp, ep))
 
-pPattern :: MonadParsec s m PosToken => m PPattern
+pPattern :: MonadParsec s m PosedToken => m PPattern
 pPattern = atom <|> discarded <|> decon <|> binded
   where
     atom      = nodify (pELit <|> pEVVar) PAtom
@@ -234,7 +160,7 @@ pPattern = atom <|> discarded <|> decon <|> binded
     decon  = do (_, sp) <- lparen
                 subcon  <- pPCon <|> pPConOp
                 (_, ep) <- rparen
-                return $ subcon $ getSourceRange (sp, ep)
+                return $ subcon $ elemPos (sp, ep)
       where
         pPCon   = do (EVar con, cp) <- pEVVar
                      binds          <- MP.many (space *> pPattern) <* space
@@ -245,4 +171,100 @@ pPattern = atom <|> discarded <|> decon <|> binded
                      return $ PConOp op pat1 pat2
     binded = do (EVar var, sp) <- pEVVar
                 pat            <- space' *> reserved "@" *> space' *> decon
-                return $ PBinding (var, sp) pat $ getSourceRange (sp, pat)
+                return $ PBinding (var, sp) pat $ elemPos (sp, pat)
+-}
+
+
+----
+
+pExpr :: ISParser s m => m (Expr ElemPos)
+-- TODO: add support for type ascription, exp :: type
+pExpr = pInfix
+  where
+    pInfix :: ISParser s m => m (Expr ElemPos)
+    pInfix = pOpExpr <|> pNeg <|> pLExpr
+      where
+        pOpExpr = do lhs <- pLExpr
+                     op  <- pOp
+                     rhs <- pInfix
+                     return $ EInfix op lhs rhs $ elemPos (lhs, rhs)
+        pNeg = scope $ fmap ENeg (satisfy (== TkVar (VarSym "-")) *> pInfix)
+
+-- TODO: add support for do-notation [after typeclass]
+    pLExpr = pLam <|> pLet <|> pIf <|> pCase {-<|> pDo-} <|> pFExpr
+      where
+        pLam  = undefined
+        pLet  = undefined
+        pIf   = undefined
+        pCase = undefined
+
+    pFExpr = do fxs <- MP.some pAExpr
+                case fxs of
+                  (f:xs) -> return $ EApp f xs $ elemPos fxs
+                  [f]    -> return f
+                  []     -> impossible
+
+-- TODO: add support for tuple, list, labeled construction and update, and
+--       consider whether to add arithmetic seqeunce and list comprehension
+    pAExpr = pVar <|> pCon <|> pLit <|> pParened <|> pLOpSec <|> pROpSec
+      where
+        pVar = let var = scope $ fmap EVar varid
+                   sym = scope $ fmap EVar (lparen *> varsym <* rparen)
+                in var <|> sym
+
+        pCon = let var = scope $ fmap ECon conid
+                   sym = scope $ fmap ECon (lparen *> consym <* rparen)
+                   lit =  scope (lparen >> rparen >> litCon "()")
+                      <|> scope (lsquar >> rsquar >> litCon "[]")
+                      <|> scope (do _  <- lparen
+                                    xs <- MP.some $ satisfy (== TkRsv ",")
+                                    _  <- rparen
+                                    let xs' = nTupleCon $ length xs
+                                    return $ ECon (ConSym xs'))
+                   litCon = return . ECon . ConSym
+-- TODO: move nTupleCon to a more general position.
+                   nTupleCon n = "(" ++ replicate n ',' ++ ")"
+                in var <|> sym
+        pLit = scope $ fmap ELit literal
+-- TODO: shall the position include parentheses?
+        pParened = scope $ do e <- lparen *> pExpr <* rparen
+                              return $ flip updateAST e
+        pLOpSec = scope $ lparen *> parser <* rparen
+          where parser = do x  <- pInfix
+                            op <- pOp
+                            return $ ELOpSec op x
+        pROpSec = scope $ lparen *> parser <* rparen
+          where parser = do op@(EOp opv _) <- pOp
+                            x <- pInfix
+                            case opv of
+                              VarSym "-" -> return $ ENeg x
+                              _          -> return $ EROpSec op x
+
+    pOp :: ISParser s m => m (Expr ElemPos)
+    pOp = let var = scope $ fmap EOp (backtick *> varid <|> conid <* backtick)
+              sym = scope $ fmap EOp (varsym <|> consym)
+          in var <|> sym
+
+{-
+|	( infixexp qop )	    (left section)
+|	( qop⟨-⟩ infixexp )	    (right section)
+
+
+%simpletype = $tycon $tyvar*
+
+%type = btype (-> type)
+%btype = (btype) atype
+%atype  = gtycon
+        | tyvar
+        | (type, type, …)
+        | [type]
+        | (type)
+
+gtycon = $tycon
+       | () | [] | (->) -> (,+)
+
+pTyVar
+pTyCon
+
+pSimpleType =
+-}

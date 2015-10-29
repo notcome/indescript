@@ -1,15 +1,17 @@
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 
+{-# LANGUAGE ConstraintKinds           #-}
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 module Language.Indescript.Parser.Prim where
 
-import Control.Applicative
+import Control.Monad.State (get, put, MonadState(..))
+
 import Data.Annotation
-import Data.Convertible
 
 import qualified Text.Megaparsec           as MP
+import qualified Text.Megaparsec.Pos       as MPos
 import           Text.Megaparsec.Prim      (MonadParsec)
 import           Text.Megaparsec.ShowToken
 
@@ -17,59 +19,115 @@ import Language.Indescript.Syntax
 import Language.Indescript.Parser.Pos
 import Language.Indescript.Parser.Lexer
 
-nextToken :: MonadParsec s m PosToken
-          => (PosToken -> Either [MP.Message] a) -> m a
-nextToken = MP.token updateTokenPos
-  where updateTokenPos _ _ (_, pos) = convert $ advanceSourcePos pos
+type ISParser s m = (MonadParsec s m PosedToken, MonadState ElemPos m)
 
-satisfy' :: MonadParsec s m PosToken => (PosToken -> Bool) -> m PosToken
+nextToken :: ISParser s m
+          => (PosedToken -> Either [MP.Message] PosedToken) -> m PosedToken
+nextToken f = do (t, ps) <- MP.token updateTokenPos f
+                 case ps of p:_ -> put p
+                            []  -> impossible
+                 return (t, ps)
+  where updateTokenPos _ mp (_, (_:ps))
+          | (p:_) <- ps = let
+            name = MPos.sourceName mp
+            in MPos.newPos name (startRow p) (startCol p)
+          | []    <- ps = mp
+        updateTokenPos _ _ _ = impossible
+
+scope' :: ISParser s m => m a -> m (a, ElemPos)
+scope' p = do start <- MP.lookAhead $ satisfy (const True) >>= return . snd
+              x     <- p
+              end   <- get
+              return (x, elemPos (start, end))
+
+scope :: ISParser s m => m (ElemPos -> a) -> m a
+scope p = do (x, p) <- scope' p
+             return $ x p
+
+satisfy' :: ISParser s m => (PosedToken -> Bool) -> m PosedToken
 satisfy' test = nextToken (\pt@(t, _) ->
   if test pt then Right pt
              else Left $ pure $ MP.Unexpected $ showToken t)
 
-satisfy :: MonadParsec s m PosToken => (Token -> Bool) -> m PosToken
+satisfy :: ISParser s m => (Token -> Bool) -> m PosedToken
 satisfy test = satisfy' test' where test' (t, _) = test t
 
-token :: MonadParsec s m PosToken => Token -> m PosToken
+token :: ISParser s m => Token -> m PosedToken
 token t = satisfy (== t)
 
-space' = MP.many (token TkWhite <|> token TkComment)
-space  = MP.many (token TkWhite <|> token TkComment <|> token TkNewline)
+reserved = token . TkRsv
 
-reserved = token . TkReserved
+lparen = token $ TkRsv "("
+rparen = token $ TkRsv "("
+lsquar = token $ TkRsv "["
+rsquar = token $ TkRsv "]"
+lbrace = token $ TkRsv "{"
+rbrace = token $ TkRsv "}"
 
-lparen = token $ TkLParen CircleParen
-rparen = token $ TkRParen CircleParen
-lbrace = token $ TkLParen CurlyParen
-rbrace = token $ TkRParen CurlyParen
+backtick = token $ TkRsv "`"
 
-class GetSourceRange a where
-  getSourceRange :: a -> SourcePos
+extractTkVar ((TkVar x), _) = return x
+extractTkVar _              = impossible
 
-instance GetSourceRange SourcePos where
-  getSourceRange = id
+varid :: ISParser s m => m Variable
+varid = satisfy test >>= extractTkVar
+  where test (TkVar (VarId _))   = True
+        test _                   = False
 
-instance GetSourceRange a => GetSourceRange (Pattern a) where
-  getSourceRange = annotation . fmap getSourceRange
+conid :: ISParser s m => m Variable
+conid = satisfy test >>= extractTkVar
+  where test (TkVar (ConId _))   = True
+        test _                   = False
 
-instance GetSourceRange a => GetSourceRange (Branch a) where
-  getSourceRange = annotation . fmap getSourceRange
+varsym :: ISParser s m => m Variable
+varsym = satisfy test >>= extractTkVar
+  where test (TkVar (VarSym _))  = True
+        test _                   = False
 
-instance GetSourceRange a => GetSourceRange (Equation a) where
-  getSourceRange = annotation . fmap getSourceRange
+consym :: ISParser s m => m Variable
+consym = satisfy test >>= extractTkVar
+  where test (TkVar (ConSym _))  = True
+        test _                   = False
 
-instance GetSourceRange a => GetSourceRange (Expr a) where
-  getSourceRange = annotation . fmap getSourceRange
+literal :: ISParser s m => m Literal
+literal = satisfy test >>= extract
+  where test (TkLit _) = True
+        test _         = False
+        extract (TkLit x, _) = return x
+        extract _            = impossible
 
-instance (GetSourceRange a, GetSourceRange b) => GetSourceRange (a, b) where
-  getSourceRange (l, r) = let
-    (SourcePos n ll lc _)        = getSourceRange l
-    (SourcePos _ rl rc (dl, dc)) = getSourceRange r
-    in SourcePos n ll lc (rl + dl - ll, rc + dc - lc)
+class GetElemPos a where
+  elemPos :: a -> ElemPos
 
-instance GetSourceRange a => GetSourceRange [a] where
-  getSourceRange = foldl1 combine . map getSourceRange
-    where combine l r = getSourceRange (l, r)
+instance GetElemPos ElemPos where
+  elemPos = id
+
+instance GetElemPos a => GetElemPos (Pattern a) where
+  elemPos = annotation . fmap elemPos
+
+instance GetElemPos a => GetElemPos (Branch a) where
+  elemPos = annotation . fmap elemPos
+
+instance GetElemPos a => GetElemPos (Equation a) where
+  elemPos = annotation . fmap elemPos
+
+instance GetElemPos a => GetElemPos (Expr a) where
+  elemPos = annotation . fmap elemPos
+
+instance (GetElemPos a, GetElemPos b) => GetElemPos (a, b) where
+  elemPos (l, r) = let
+    lp = elemPos l; ls = startPoint lp; le = endPoint lp
+    rp = elemPos r; rs = startPoint rp; re = endPoint rp
+    ps = min ls rs
+    pe = max le re
+    in ElemPos ps (diffPoint ps pe)
+
+instance GetElemPos a => GetElemPos [a] where
+  elemPos = foldl1 combine . map elemPos
+    where combine l r = elemPos (l, r)
+
+instance ShowToken Token where
+  showToken = show
 
 instance (ShowToken a, ShowToken b) => ShowToken (a, b) where
   showToken (a, b) = "(" ++ showToken a ++ ", " ++ showToken b ++ ")"
@@ -78,3 +136,5 @@ instance (ShowToken a) => ShowToken [a] where
   showToken []     = "[]"
   showToken [x]    = "[" ++ showToken x ++ "]"
   showToken (x:xs) = "[" ++ showToken x ++ concatMap ((", " ++) . showToken) xs ++ "]"
+
+impossible = error "Confident impossibility."
