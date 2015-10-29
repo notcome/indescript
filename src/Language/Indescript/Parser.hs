@@ -8,248 +8,85 @@
 module Language.Indescript.Parser where
 
 import Control.Applicative
-import Data.Annotation
 
 import           Text.Megaparsec.ShowToken
 import qualified Text.Megaparsec      as MP
-import           Text.Megaparsec.Prim (MonadParsec)
 
 import Language.Indescript.Syntax
 import Language.Indescript.Parser.Prim
 import Language.Indescript.Parser.Pos
 import Language.Indescript.Parser.Lexer
 
-{-
-parse' parser src input = case lexSource src input of
-  (Left errMsg) -> Left $ show errMsg
-  (Right lexed) -> let lexed' = insertSemicolonBraces lexed
-    in case MP.parse parser src lexed' of
-      (Left errMsg)  -> Left $ show errMsg
-      (Right parsed) -> Right parsed
-  where
-    -- TODO: implement the semicolon brace insertion algorithm
-    insertSemicolonBraces = id
+--    # Primitives
+--   ## Special Characters
+--  ### Literal Values
+lparen = reserved "("
+rparen = reserved "("
+lsquar = reserved "["
+rsquar = reserved "]"
+lbrace = reserved "{"
+rbrace = reserved "}"
 
-parse = parse' pAtom
+negsign = token $ TkVar $ VarSym "-"
 
-type PPattern = Pattern SourcePos
-type PExpr    = Expr    SourcePos
+backtick = reserved "`"
 
-pAtom :: MonadParsec s m PosedToken => m PExpr
-pAtom = pIf <|> pLit <|> pVar <|> pLam <|> pCase <|> pParened -- pLet <|>
+--  ### Combinators
+paren p = lparen *> p <* rparen
 
-pParened :: MonadParsec s m PosedToken => m PExpr
-pParened = do (_, sp) <- lparen <* space
-              (e, fl) <- resolve =<< MP.many (pAtom' <* space)
-              (_, ep) <- space *> rparen
-              if fl then return $ fmap (const $ elemPos (sp, ep)) e
-                    else return e
-  where
-    pAtom' = nakedOp <|> pAtom
-      where nakedOp = do (op, pos) <- pEOp; return $ EAtom (EOp op) pos
+--   ## Simple Combinators
+--  ### Extractors
+varid :: ISParser s m => m Variable
+varid = satisfy test >>= extractTkVar
+  where test (TkVar (VarId _))   = True
+        test _                   = False
 
-    isOp (EAtom (EOp _) _) = True
-    isOp _                 = False
-    notOp                  = not . isOp
+conid :: ISParser s m => m Variable
+conid = satisfy test >>= extractTkVar
+  where test (TkVar (ConId _))   = True
+        test _                   = False
 
-    resolve []    = return (EAtom (ELit LUnit) undefined, True)
-    resolve [x]
-      | isOp x    = return (x, True)
-      | otherwise = return (x, False)
-    resolve [x, y]
-      | isOp x && notOp y, EAtom (EOp op) p <- x =
-        return (EOpSec (op, p) y SecRight undefined, True)
-      | isOp y && notOp x, EAtom (EOp op) p <- y =
-        return (EOpSec (op, p) x SecLeft  undefined, True)
-    resolve l = do res <- build' l; return (res, False)
-      where
-        build' xs     = let (lhs, op_rhs) = break isOp xs in build lhs op_rhs
-        appFn  []     = error "Impossible happens!"
-        appFn  [f]    = return f
-        appFn  (f:xs) = return $ EApp f xs $ elemPos (f:xs)
+varsym :: ISParser s m => m Variable
+varsym = satisfy test >>= extractTkVar
+  where test (TkVar (VarSym _))  = True
+        test _                   = False
 
-        build []  []       = error "Impossible happens!"
-        build []  (op:_)   = fail $ "Left operand not found at "  ++ (show . annotation) op
-        build _   (op:[])  = fail $ "Right operand not found at " ++ (show . annotation) op
-        build fxs []       = appFn fxs
-        build lhs (op:rhs) = do
-          lhs' <- appFn  lhs
-          rhs' <- build' rhs
-          return $ EApp op [lhs', rhs'] $ elemPos (lhs', rhs')
+consym :: ISParser s m => m Variable
+consym = satisfy test >>= extractTkVar
+  where test (TkVar (ConSym _))  = True
+        test _                   = False
 
-pIf :: MonadParsec s m PosedToken => m PExpr
-pIf = do (_, sp) <- reserved "if"   <* space
-         cond    <- pAtom <* space
-         _       <- reserved "then" <* space
-         exp1    <- pAtom <* space
-         _       <- reserved "else" <* space
-         exp2    <- pAtom
-         return $ EIf cond exp1 exp2 $ elemPos (sp, [exp1, exp2])
+extractTkVar ((TkVar x), _) = return x
+extractTkVar _              = impossible
 
-pLam :: MonadParsec s m PosedToken => m PExpr
-pLam = do (_, sp) <- reserved "\\" <* space
-          px      <- pPattern
-          pxs     <- MP.many (space *> pPattern)
-          space *> reserved "->" <* space
-          expr    <- pAtom
-          return $ ELam (px:pxs) expr $ elemPos (sp, expr)
+literal :: ISParser s m => m Literal
+literal = satisfy test >>= extract
+  where test (TkLit _) = True
+        test _         = False
+        extract (TkLit x, _) = return x
+        extract _            = impossible
 
--- TODO: insert semicolon and braces
-pCase :: MonadParsec s m PosedToken => m PExpr
-pCase = do (_, sp) <- reserved "case" <* space
-           expr    <- pAtom <* space
-           reserved "of" >> space >> lbrace >> space
-           brchs   <- MP.many (branch <* space <* token TkSemicolon <* space)
-           (_, ep) <- space *> rbrace
-           return $ ECase expr brchs $ elemPos (sp, ep)
-  where branch = do pat <- pPattern
-                    space *> reserved "->" <* space
-                    expr <- pAtom
-                    return $ Branch pat expr $ elemPos (pat, expr)
+--  ### Combinators
+var :: ISParser s m => m Variable
+var = varid <|> paren varsym
 
-nodify :: MonadParsec s m PosedToken
-       => m (a, SourcePos)
-       -> (a -> SourcePos -> b)
-       -> m b
-nodify parser con = do (x, pos) <- parser; return $ con x pos
+con :: ISParser s m => m Variable
+con = conid <|> paren consym <|> lit
+  where lit =  (lparen >> rparen >> return (ConSym "()"))
+           <|> (lsquar >> rsquar >> return (ConSym "[]"))
+           <|> paren pTupleCon
+        pTupleCon = MP.some (reserved ",") >>= (return . mkTuple . length)
+-- TODO: move mkTuple to a more general position.
+        mkTuple n = ConSym $ "(" ++ replicate n ',' ++ ")"
 
-pLit = nodify pELit  EAtom
-pVar = nodify pEVVar EAtom
+pOp :: ISParser s m => m (Op ElemPos)
+pOp = scope $ (oid <|> sym) >>= return . Op
+  where oid = backtick *> varid <|> conid <* backtick
+        sym = varsym <|> consym
 
-pELit :: MonadParsec s m PosedToken => m (EAtom, SourcePos)
-pELit = do (TkLiteral lit, pos) <- satisfy isLiteral
-           return (ELit lit, pos)
-  where isLiteral (TkLiteral _) = True
-        isLiteral _             = False
-
-pEVVar :: MonadParsec s m PosedToken => m (EAtom, SourcePos)
-pEVVar = do (tok, pos) <- satisfy isVarCon
-            let atom = case tok of TkVarId x -> x
-                                   TkConId x -> x
-                                   _         -> error "Impossible happens!"
-            return (EVar $ EVVar atom, pos)
-  where isVarCon (TkVarId _) = True
-        isVarCon (TkConId _) = True
-        isVarCon _           = False
-
-pEOp :: MonadParsec s m PosedToken => m (EOp, SourcePos)
-pEOp = sym <|> var
-  where
-    isSymbol (TkVarSym _) = True
-    isSymbol (TkConSym _) = True
-    isSymbol _            = False
-    backtick              = token TkBacktick
-
-    sym = do (tok, pos) <- satisfy isSymbol
-             let op = case tok of TkVarSym x -> x
-                                  TkConSym x -> x
-                                  _          -> error "Impossible happens!"
-             return (EOOp op, pos)
-
-    var = do (_, sp) <- backtick <* space'
-             (EVar (EVVar tok), _) <- pEVVar
-             (_, ep) <- space' *> backtick
-             return (EOVar tok, elemPos (sp, ep))
-
-pPattern :: MonadParsec s m PosedToken => m PPattern
-pPattern = atom <|> discarded <|> decon <|> binded
-  where
-    atom      = nodify (pELit <|> pEVVar) PAtom
-    discarded = (PDiscard . snd) <$> reserved "_"
-
-    decon  = do (_, sp) <- lparen
-                subcon  <- pPCon <|> pPConOp
-                (_, ep) <- rparen
-                return $ subcon $ elemPos (sp, ep)
-      where
-        pPCon   = do (EVar con, cp) <- pEVVar
-                     binds          <- MP.many (space *> pPattern) <* space
-                     return $ PCon (con, cp) binds
-        pPConOp = do pat1 <- pPattern <* space
-                     op   <- pEOp <* space
-                     pat2 <- pPattern
-                     return $ PConOp op pat1 pat2
-    binded = do (EVar var, sp) <- pEVVar
-                pat            <- space' *> reserved "@" *> space' *> decon
-                return $ PBinding (var, sp) pat $ elemPos (sp, pat)
--}
-
-
-----
-
-pExpr :: ISParser s m => m (Expr ElemPos)
--- TODO: add support for type ascription, exp :: type
-pExpr = pInfix
-  where
-    pInfix :: ISParser s m => m (Expr ElemPos)
-    pInfix = pOpExpr <|> pNeg <|> pLExpr
-      where
-        pOpExpr = do lhs <- pLExpr
-                     op  <- pOp
-                     rhs <- pInfix
-                     return $ EInfix op lhs rhs $ elemPos (lhs, rhs)
-        pNeg = scope $ fmap ENeg (satisfy (== TkVar (VarSym "-")) *> pInfix)
-
--- TODO: add support for do-notation [after typeclass]
-    pLExpr = pLam <|> pLet <|> pIf <|> pCase {-<|> pDo-} <|> pFExpr
-      where
-        pLam  = undefined
-        pLet  = undefined
-        pIf   = undefined
-        pCase = undefined
-
-    pFExpr = do fxs <- MP.some pAExpr
-                case fxs of
-                  (f:xs) -> return $ EApp f xs $ elemPos fxs
-                  [f]    -> return f
-                  []     -> impossible
-
--- TODO: add support for tuple, list, labeled construction and update, and
---       consider whether to add arithmetic seqeunce and list comprehension
-    pAExpr = pVar <|> pCon <|> pLit <|> pParened <|> pLOpSec <|> pROpSec
-      where
-        pVar = let var = scope $ fmap EVar varid
-                   sym = scope $ fmap EVar (lparen *> varsym <* rparen)
-                in var <|> sym
-
-        pCon = let var = scope $ fmap ECon conid
-                   sym = scope $ fmap ECon (lparen *> consym <* rparen)
-                   lit =  scope (lparen >> rparen >> litCon "()")
-                      <|> scope (lsquar >> rsquar >> litCon "[]")
-                      <|> scope (do _  <- lparen
-                                    xs <- MP.some $ satisfy (== TkRsv ",")
-                                    _  <- rparen
-                                    let xs' = nTupleCon $ length xs
-                                    return $ ECon (ConSym xs'))
-                   litCon = return . ECon . ConSym
--- TODO: move nTupleCon to a more general position.
-                   nTupleCon n = "(" ++ replicate n ',' ++ ")"
-                in var <|> sym
-        pLit = scope $ fmap ELit literal
--- TODO: shall the position include parentheses?
-        pParened = scope $ do e <- lparen *> pExpr <* rparen
-                              return $ flip updateAST e
-        pLOpSec = scope $ lparen *> parser <* rparen
-          where parser = do x  <- pInfix
-                            op <- pOp
-                            return $ ELOpSec op x
-        pROpSec = scope $ lparen *> parser <* rparen
-          where parser = do op@(EOp opv _) <- pOp
-                            x <- pInfix
-                            case opv of
-                              VarSym "-" -> return $ ENeg x
-                              _          -> return $ EROpSec op x
-
-    pOp :: ISParser s m => m (Expr ElemPos)
-    pOp = let var = scope $ fmap EOp (backtick *> varid <|> conid <* backtick)
-              sym = scope $ fmap EOp (varsym <|> consym)
-          in var <|> sym
+--    # Non-trivial Combinators
 
 {-
-|	( infixexp qop )	    (left section)
-|	( qop⟨-⟩ infixexp )	    (right section)
-
-
 %simpletype = $tycon $tyvar*
 
 %type = btype (-> type)
@@ -267,4 +104,94 @@ pTyVar
 pTyCon
 
 pSimpleType =
+-}
+
+--   ## Pattern
+pPat :: ISParser s m => m (Pat ElemPos)
+pPat = pInfix <|> pLPat
+  where
+    pInfix :: ISParser s m => m (Pat ElemPos)
+    pInfix = pOpCon <|> pLPat
+      where pOpCon = scope $ liftA3 (flip PInfix) pLPat pOp pPat
+    pLPat = pAPat <|> pNeg <|> pFPat
+      where
+        pNeg = scope $ do _   <- negsign
+                          lit <- literal
+                          case lit of
+                            LInt   n -> return $ PLit $ LInt   (-n)
+                            LFloat n -> return $ PLit $ LFloat (-n)
+                            _        -> fail "expected a number."
+        pFPat = scope $ do f  <- scope $ fmap PCon con
+                           xs <- MP.some pAPat
+                           return $ PApp f xs
+
+pAPat :: ISParser s m => m (Pat ElemPos)
+-- TODO: add support for tuple, list, labeled pattern, and irrefutable pattern
+pAPat = pAs <|> pAs' <|> pCon <|> pLit <|> pWildcard <|> pParened
+  where
+    pAs  = scope $ fmap PVar var
+    pAs' = scope $ liftA2 PAs pAs (reserved "a" *> pAPat)
+    pCon = scope $ fmap PCon con
+    pLit = scope $ fmap PLit literal
+    pWildcard = scope $ reserved "_" *> return PWildcard
+    pParened  = scope $ paren pPat >>= return . flip updateAST
+
+--   ## Expression
+pExpr :: ISParser s m => m (Expr ElemPos)
+-- TODO: add support for type ascription, exp :: type
+pExpr = pInfix
+  where
+    pInfix :: ISParser s m => m (Expr ElemPos)
+    pInfix = pOpExpr <|> pNeg <|> pLExpr
+      where
+        pOpExpr = scope $ liftA3 (flip EInfix) pLExpr pOp pInfix
+        pNeg = scope $ fmap ENeg (negsign *> pInfix)
+
+-- TODO: add support for do-notation [after typeclass]
+    pLExpr = pLam <|> pLet <|> pIf <|> pCase {-<|> pDo-} <|> pFExpr
+      where
+        pLam  = undefined
+        pLet  = undefined
+        pIf   = undefined
+        pCase = undefined
+
+    pFExpr = do fxs <- MP.some pAExpr
+                case fxs of
+                  [f]    -> return f
+                  (f:xs) -> return $ EApp f xs $ elemPos fxs
+                  []     -> impossible
+
+-- TODO: add support for tuple, list, labeled construction and update, and
+--       consider whether to add arithmetic seqeunce and list comprehension
+    pAExpr = pVar <|> pCon <|> pLit <|> pParened <|> pLOpSec <|> pROpSec
+      where
+        pVar = scope $ fmap EVar var
+        pCon = scope $ fmap ECon con
+        pLit = scope $ fmap ELit literal
+        pParened = scope $ paren pExpr >>= (return . flip updateAST)
+        pLOpSec = scope $ paren parser
+          where parser = do x  <- pInfix
+                            op <- pOp
+                            return $ ELOpSec op x
+        pROpSec = scope $ paren parser
+          where parser = do op@(Op opv _) <- pOp
+                            x <- pInfix
+                            case opv of
+                              VarSym "-" -> return $ ENeg x
+                              _          -> return $ EROpSec op x
+
+--    # Interface
+{-
+parse' parser src input = case lexSource src input of
+  (Left errMsg) -> Left $ show errMsg
+  (Right lexed) -> let lexed' = insertSemicolonBraces lexed
+    in case MP.parse parser src lexed' of
+      (Left errMsg)  -> Left $ show errMsg
+      (Right parsed) -> Right parsed
+  where
+    -- TODO: implement the semicolon brace insertion algorithm
+    insertSemicolonBraces = id
+
+parse = parse' pAtom
+
 -}

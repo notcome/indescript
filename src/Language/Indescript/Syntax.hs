@@ -19,6 +19,9 @@ data Variable = VarId  String
               | ConSym String
               deriving (Eq, Show)
 
+data Op a = Op Variable a
+          deriving (Eq, Show, Functor, Generic1)
+
 data Expr a = ELam a
             | ELet a
             | EIf  a
@@ -26,46 +29,30 @@ data Expr a = ELam a
             | EApp (Expr a) [Expr a] a
             | EVar Variable a
             | ECon Variable a
-            | EOp  Variable a
             | ELit Literal  a
-            | EList a
-            | ETuple a
-            | ELOpSec (Expr a) (Expr a) a
-            | EROpSec (Expr a) (Expr a) a
-            | EInfix  (Expr a) (Expr a) (Expr a) a
+            | ELOpSec (Op a) (Expr a) a
+            | EROpSec (Op a) (Expr a) a
+            | EInfix  (Op a) (Expr a) (Expr a) a
             | ENeg    (Expr a) a
             deriving (Eq, Show, Functor, Generic1)
 
-data EVar = EVVar String
-          | EVOp  String
-          deriving (Eq, Ord, Show)
-data EOp  = EOVar String
-          | EOOp  String
-          deriving (Eq, Ord, Show)
 
-data EAtom = A deriving (Eq, Show)
+data Pat a = PVar Variable a
+           | PAs  (Pat a) (Pat a) a
+           | PLit Literal  a
+           | PCon Variable a
+           | PWildcard a
+           | PApp   (Pat a) [Pat a] a
+           | PInfix (Op a) (Pat a) (Pat a) a
+           deriving (Eq, Show, Functor, Generic1)
 
-data Pattern a -- Atoms and Underscore
-               = PAtom    EAtom a
-               | PDiscard       a
-               -- Constructors and @-Binding
-               | PCon     (EVar, a) [Pattern a]             a
-               | PConOp   (EOp, a)  (Pattern a) (Pattern a) a
-               | PBinding (EVar, a) (Pattern a)             a
-               deriving (Eq, Show, Functor, Generic1)
-
-instance Annotation Pattern where
-  annotation = genericAnnotation
-
-data Branch a = Branch (Pattern a) (Expr a) a
-              deriving (Eq, Show, Functor, Generic1)
-
-instance Annotation Branch where
+instance Annotation Pat where
   annotation = genericAnnotation
 
 -- "Supercombinator" here only refers to functions with
 -- one or more cases.
 -- [Supercomb a] stands for where-binding.
+{-
 data Equation a  = EquFn (EVar, a) [Pattern a]             (Expr a) [Supercomb a] a
                  | EquOp (EOp, a)  (Pattern a) (Pattern a) (Expr a) [Supercomb a] a
                  deriving (Eq, Show, Functor, Generic1)
@@ -73,23 +60,6 @@ type Supercomb a = [Equation a]
 
 instance Annotation Equation where
   annotation = genericAnnotation
-
-data OpSecDir = SecLeft | SecRight deriving (Eq, Show)
-
-{-
-data Expr a = EAtom  EAtom a
-            -- Operator Section/Application, Function Application, If-Then-Else
-            | EOpSec (EOp, a) (Expr a) OpSecDir a
-            | EOpApp (EOp, a) (Expr a) (Expr a) a
-            | EApp   (Expr a) [Expr a]          a
-            | EIf    (Expr a) (Expr a) (Expr a) a
-            -- Case-Of
-            | ECase  (Expr a) [Branch a] a
-            -- Lambda
-            | ELam   [Pattern a] (Expr a) a
-            -- Let
-            | ELet   [Supercomb a] (Expr a) a
-            deriving (Eq, Show, Functor, Generic1)
 -}
 
 instance Annotation Expr where

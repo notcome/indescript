@@ -57,58 +57,13 @@ token t = satisfy (== t)
 
 reserved = token . TkRsv
 
-lparen = token $ TkRsv "("
-rparen = token $ TkRsv "("
-lsquar = token $ TkRsv "["
-rsquar = token $ TkRsv "]"
-lbrace = token $ TkRsv "{"
-rbrace = token $ TkRsv "}"
-
-backtick = token $ TkRsv "`"
-
-extractTkVar ((TkVar x), _) = return x
-extractTkVar _              = impossible
-
-varid :: ISParser s m => m Variable
-varid = satisfy test >>= extractTkVar
-  where test (TkVar (VarId _))   = True
-        test _                   = False
-
-conid :: ISParser s m => m Variable
-conid = satisfy test >>= extractTkVar
-  where test (TkVar (ConId _))   = True
-        test _                   = False
-
-varsym :: ISParser s m => m Variable
-varsym = satisfy test >>= extractTkVar
-  where test (TkVar (VarSym _))  = True
-        test _                   = False
-
-consym :: ISParser s m => m Variable
-consym = satisfy test >>= extractTkVar
-  where test (TkVar (ConSym _))  = True
-        test _                   = False
-
-literal :: ISParser s m => m Literal
-literal = satisfy test >>= extract
-  where test (TkLit _) = True
-        test _         = False
-        extract (TkLit x, _) = return x
-        extract _            = impossible
-
 class GetElemPos a where
   elemPos :: a -> ElemPos
 
 instance GetElemPos ElemPos where
   elemPos = id
 
-instance GetElemPos a => GetElemPos (Pattern a) where
-  elemPos = annotation . fmap elemPos
-
-instance GetElemPos a => GetElemPos (Branch a) where
-  elemPos = annotation . fmap elemPos
-
-instance GetElemPos a => GetElemPos (Equation a) where
+instance GetElemPos a => GetElemPos (Pat a) where
   elemPos = annotation . fmap elemPos
 
 instance GetElemPos a => GetElemPos (Expr a) where
