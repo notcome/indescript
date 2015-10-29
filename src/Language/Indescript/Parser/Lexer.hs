@@ -2,7 +2,12 @@
 
 {-# LANGUAGE TupleSections #-}
 
-module Language.Indescript.Parser.Lexer where
+module Language.Indescript.Parser.Lexer (
+    Token(..)
+  , LinkedPos
+  , PosedToken
+  , lexIndescript
+) where
 
 import Data.Char              (ord)
 import Text.Regex.Applicative
@@ -100,8 +105,8 @@ token :: RE Char TokenResult
 token = triggers <|> right vars <|> right lits <|> right pncs
   where
     triggers =  (pure $ Left TrString)  <* tString
-            <|> (pure $ Left TrChar)    <* tString
-            <|> (pure $ Left TrComment) <* tString
+            <|> (pure $ Left TrChar)    <* tChar
+            <|> (pure $ Left TrComment) <* tBlockComment
             <|> (pure $ Left TrLine)    <* cLine
             <|> white
 
@@ -139,16 +144,16 @@ tokens :: String -> SourcePoint -> Maybe [(Token, ElemPos)]
 tokens "" _ = Just []
 tokens s  pnt = case findLongestPrefix token s of
   Just (Right (t, w), s') -> let
-    pos = unlinkedPos pnt (SourceSpan (0, w))
+    pos = ElemPos pnt $ SourceSpan (0, w)
     in fmap ((t, pos):) $ tokens s' $ endPoint pos
   Just (Left trigger, s') -> case trigger of
     TrWhite w -> tokens s' $ incCol w pnt
-    TrLine    -> tokens s' $ SourcePoint (1 + srcRow pnt, 0)
+    TrLine    -> tokens s' $ SourcePoint (1 + srcRow pnt, 1)
     _         -> error "not supported yet"
   Nothing -> Nothing
 
 lexTokens :: String -> Maybe [(Token, ElemPos)]
-lexTokens = flip tokens $ SourcePoint (0, 0)
+lexTokens = flip tokens $ SourcePoint (1, 1)
 
 --    # Postprocessing
 --   ## Layout Resolution
@@ -226,27 +231,27 @@ layout [] (m:ms)
   | m /= 0 = (rbrace:) <$> layout [] ms
 layout _  _  = impossible
 
-semicolon = (TkRsv ";", nullPos pesudoPoint Nothing)
-lbrace    = (TkRsv "{", nullPos pesudoPoint Nothing)
-rbrace    = (TkRsv "}", nullPos pesudoPoint Nothing)
+semicolon = (TkRsv ";", nullPos pesudoPoint)
+lbrace    = (TkRsv "{", nullPos pesudoPoint)
+rbrace    = (TkRsv "}", nullPos pesudoPoint)
 
 --   ## Position Resolution
-resolvePosition :: [(Token, ElemPos)] -> [(Token, ElemPos)]
+resolvePosition :: [(Token, ElemPos)] -> [PosedToken]
 resolvePosition = fst . resolve
   where
-    resolve :: [(Token, ElemPos)] -> ([(Token, ElemPos)], ElemPos)
-    resolve []         = ([], nullPos pesudoPoint Nothing)
-    resolve ((t1, p1) : (t2, _) : xs)
-      | elem t2 $ map TkRsv [";", "{", "}"] = let
+    resolve :: [(Token, ElemPos)] -> ([PosedToken], LinkedPos)
+    resolve []         = ([], [])
+    resolve ((t1, p1) : (t2, p2) : xs)
+      | startPoint p2 == pesudoPoint = let
         (xs', ps') = resolve xs
         p2'        = nullPos (if t2 == TkRsv "{"
-                              then startPoint ps'
-                              else endPoint   p1) (Just ps')
-        p1'        = p1 { nextElem = Just p2' }
+                              then startPoint $ head ps'
+                              else endPoint p1) : ps'
+        p1'        = p1:p2'
         in ((t1, p1') : (t2, p2') : xs', p1')
     resolve ((t, p):xs) = let
       (ts', ps') = resolve xs
-      p'         = p { nextElem = Just ps' }
+      p'         = p:ps'
       in ((t, p') : ts', p')
 
 --    # Interface
@@ -255,12 +260,13 @@ data Token = TkLit Literal
            | TkVar Variable
            | TkRsv String
            | TkPnc Char
-           deriving (Eq)
+           deriving (Eq, Show)
 
-type PosedToken = (Token, ElemPos)
+type LinkedPos  = [ElemPos]
+type PosedToken = (Token, LinkedPos)
 
 --   ## Interface Functions
-lexIndescript :: String -> Maybe [(Token, ElemPos)]
+lexIndescript :: String -> Maybe [PosedToken]
 lexIndescript src = lexTokens src >>= resolveLayout >>= (pure . resolvePosition)
 
 --    # Regex.Applicative combinator extension
@@ -274,16 +280,12 @@ infixr <++>
 infixr <:>
 
 --    # Helper Datatypes and Funcitons
-
 data Trigger = TrString
              | TrChar
              | TrComment
              | TrWhite Int
              | TrLine
              deriving (Eq, Show)
-
-unlinkedPos :: SourcePoint -> SourceSpan -> ElemPos
-unlinkedPos p s = ElemPos p s Nothing
 
 -- TODO: Move to a general module.
 impossible = error "Confident impossibility."

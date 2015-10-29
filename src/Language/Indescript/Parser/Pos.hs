@@ -1,11 +1,13 @@
 module Language.Indescript.Parser.Pos where
 
+--   ## SourcePoint
 newtype SourcePoint = SourcePoint { unSourcePoint :: (Int, Int) }
                     deriving (Eq, Ord, Show)
 
 pesudoPoint :: SourcePoint
 pesudoPoint = SourcePoint (-1, -1)
 
+--  ### Accessors
 srcRow :: SourcePoint -> Int
 srcRow = fst . unSourcePoint
 srcCol :: SourcePoint -> Int
@@ -16,26 +18,29 @@ incCol inc p = SourcePoint (srcRow p, inc + srcCol p)
 incRow :: Int -> SourcePoint -> SourcePoint
 incRow inc p = SourcePoint (inc + srcRow p, srcCol p)
 
+--   ## SourceSpan
 newtype SourceSpan  = SourceSpan  { unSourceSpan  :: (Int, Int) }
                     deriving (Eq, Ord, Show)
 
 zeroSpan :: SourceSpan
 zeroSpan = SourceSpan (0, 0)
 
+--  ### Accessors
 deltaRow :: SourceSpan  -> Int
 deltaRow = fst . unSourceSpan
 deltaCol :: SourceSpan  -> Int
 deltaCol = snd . unSourceSpan
 
+--   ## ElemPos
 data ElemPos = ElemPos
              { startPoint :: SourcePoint
              , elemSpan   :: SourceSpan
-             , nextElem   :: Maybe ElemPos
 -- TODO: implement a better show instance.
              } deriving (Eq, Show)
 
+--  ### Accessors
 endPoint :: ElemPos -> SourcePoint
-endPoint (ElemPos p d _) = let
+endPoint (ElemPos p d) = let
   (r0, c0) = unSourcePoint p
   (dr, dc) = unSourceSpan  d
   in SourcePoint (r0 + dr, c0 + dc)
@@ -45,11 +50,12 @@ startRow = srcRow . startPoint
 startCol :: ElemPos -> Int
 startCol = srcCol . startPoint
 
-nullPos :: SourcePoint -> Maybe ElemPos -> ElemPos
+--   ## Functions
+nullPos :: SourcePoint -> ElemPos
 nullPos = flip ElemPos zeroSpan
 
 diffPoint :: SourcePoint -> SourcePoint -> SourceSpan
 diffPoint p0 p1 = let
-  dr = srcRow p0 - srcRow p1
-  dc = srcCol p0 - srcCol p1
+  dr = srcRow p1 - srcRow p0
+  dc = srcCol p1 - srcCol p0
   in SourceSpan (dr, dc)
