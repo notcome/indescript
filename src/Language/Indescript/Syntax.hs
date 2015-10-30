@@ -3,7 +3,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 module Language.Indescript.Syntax where
 
-import GHC.Generics
+import GHC.Generics    hiding (Fixity)
 import Data.Annotation
 
 data Literal = LInt    Int
@@ -62,6 +62,36 @@ data Type a = TVar Variable a
             deriving (Eq, Show, Functor, Generic1)
 
 instance Annotation Type where
+  annotation = genericAnnotation
+
+--   ## Declaration
+data AssocType = Infix | InfixL | InfixR deriving (Eq, Show)
+data Fixity a  = Fixity   AssocType     [Op a] a
+               | FixityLv AssocType Int [Op a] a
+               deriving (Eq, Show, Functor, Generic1)
+
+instance Annotation Fixity where
+  annotation = genericAnnotation
+
+data Var a = Var Variable a
+           deriving (Eq, Show, Functor, Generic1)
+
+instance Annotation Var where
+  annotation = genericAnnotation
+
+data FnLhs a = FnArgs (Var a) [Pat a] a
+             | FnOp   (Pat a) (Op a) (Pat a) a
+             deriving (Eq, Show, Functor, Generic1)
+
+instance Annotation FnLhs where
+  annotation = genericAnnotation
+
+data Decl a = DeclFn (FnLhs a) (Expr a) [Decl a] a
+            | DeclTypeSig [Var a] (Type a) a
+            | DeclFixity  (Fixity a) a
+            deriving (Eq, Show, Functor, Generic1)
+
+instance Annotation Decl where
   annotation = genericAnnotation
 
 -- "Supercombinator" here only refers to functions with

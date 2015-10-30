@@ -9,7 +9,7 @@ module Language.Indescript.Parser where
 
 import Control.Applicative
 
-import           Text.Megaparsec.ShowToken
+--import           Text.Megaparsec.ShowToken
 import qualified Text.Megaparsec      as MP
 
 import Language.Indescript.Syntax
@@ -30,8 +30,11 @@ rbrace = reserved "}"
 negsign = token $ TkVar $ VarSym "-"
 dotsign = token $ TkVar $ VarSym "."
 
-backtick = reserved "`"
+backtick  = reserved "`"
+semicolon = reserved ";"
+comma     = reserved ","
 
+equal  = reserved "="
 sarrow = reserved "->"
 darrow = reserved "=>"
 
@@ -81,17 +84,15 @@ con = conid <|> paren consym <|> lit
 -- TODO: move mkTuple to a more general position.
         mkTuple n = ConSym $ "(" ++ replicate n ',' ++ ")"
 
-pOp :: ISParser s m => m (Op ElemPos)
+pOp, pConOp, pTyConOp :: ISParser s m => m (Op ElemPos)
 pOp = scope $ (oid <|> sym) >>= return . Op
   where oid = backtick *> varid <|> conid <* backtick
         sym = varsym <|> consym
 
-pConOp :: ISParser s m => m (Op ElemPos)
 pConOp = scope $ (oid <|> sym) >>= return . Op
   where oid = backtick *> varid <|> conid <* backtick
         sym = varsym <|> consym
 
-pTyConOp :: ISParser s m => m (Op ElemPos)
 pTyConOp = pConOp <|> arrowOp
   where arrowOp = scope $ sarrow >>= extractTkVar >>= return . Op
 
@@ -179,22 +180,73 @@ pExpr = pInfix
 
 -- TODO: add support for tuple, list, labeled construction and update, and
 --       consider whether to add arithmetic seqeunce and list comprehension
-    pAExpr = pVar <|> pCon <|> pLit <|> pParened <|> pLOpSec <|> pROpSec
+    pAExpr = scope $ pVar <|> pCon <|> pLit <|> pParened <|> pLOpSec <|> pROpSec
       where
-        pVar = scope $ fmap EVar var
-        pCon = scope $ fmap ECon con
-        pLit = scope $ fmap ELit literal
-        pParened = scope $ paren pExpr >>= (return . flip updateAST)
-        pLOpSec = scope $ paren parser
+        pVar = fmap EVar var
+        pCon = fmap ECon con
+        pLit = fmap ELit literal
+        pParened = paren pExpr >>= (return . flip updateAST)
+        pLOpSec = paren parser
           where parser = do x  <- pInfix
                             op <- pOp
                             return $ ELOpSec op x
-        pROpSec = scope $ paren parser
+        pROpSec = paren parser
           where parser = do op@(Op opv _) <- pOp
                             x <- pInfix
                             case opv of
                               VarSym "-" -> return $ ENeg x
                               _          -> return $ EROpSec op x
+
+--    # Declarations
+pGenDecl :: ISParser s m => m (Decl ElemPos)
+pGenDecl = scope $ pTypeSig <|> pFixity
+  where
+-- TODO: add support for type signature with context.
+    pTypeSig = liftA2 DeclTypeSig pVars pType
+      where pVars = MP.sepBy1 (scope $ fmap Var var) comma
+    pFixity  = fmap DeclFixity pFixity'
+      where
+        pFixity' = scope $  liftA2 Fixity pAssocType pOps
+                        <|> liftA3 FixityLv pAssocType pInt pOps
+
+        pAssocType =  reserved "infixl" *> return InfixL
+                  <|> reserved "infixr" *> return InfixR
+                  <|> reserved "infix"  *> return Infix
+
+        pInt :: ISParser s m => m Int
+        pInt = satisfy test >>= extract
+          where test (TkLit _) = True
+                test _         = False
+                extract (TkLit (LInt x), _) = return x
+                extract _                   = impossible
+
+        pOps = MP.sepBy1 pOp comma
+
+
+pDecl :: ISParser s m => m (Decl ElemPos)
+pDecl =  pGenDecl <|> pDecl'
+  where
+    pDecl' = scope (liftA3 mkDeclFn pLhs (equal *> pRhs) (optional pWhere))
+
+    mkDeclFn lhs rhs Nothing   = DeclFn lhs rhs []
+    mkDeclFn lhs rhs (Just ws) = DeclFn lhs rhs ws
+
+    pLhs = pOpLhs <|> pLLhs
+      where
+        pOpLhs = scope $ liftA3 FnOp pPat pOp pPat
+        pLLhs  = p1 <|> p2
+          where
+            p1 = scope $ liftA2 FnArgs var' (MP.some pAPat)
+              where var' = scope $ fmap Var var
+            p2 = scope $ do (FnArgs f xs _) <- paren p1
+                            rest            <- MP.some pAPat
+                            return $ FnArgs f (xs ++ rest)
+
+-- TODO: add support for guard expression.
+    pRhs = pExpr
+    pWhere = reserved "where" *> lbrace *> pClauses <* rbrace
+      where
+        pClauses =  MP.many (pDecl <* semicolon)
 
 --    # Interface
 {-
