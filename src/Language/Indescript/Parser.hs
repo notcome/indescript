@@ -28,30 +28,31 @@ lbrace = reserved "{"
 rbrace = reserved "}"
 
 negsign = token $ TkVar $ VarSym "-"
+dotsign = token $ TkVar $ VarSym "."
 
 backtick = reserved "`"
+
+sarrow = reserved "->"
+darrow = reserved "=>"
 
 --  ### Combinators
 paren p = lparen *> p <* rparen
 
 --   ## Simple Combinators
 --  ### Extractors
-varid :: ISParser s m => m Variable
+varid, conid, varsym, consym :: ISParser s m => m Variable
 varid = satisfy test >>= extractTkVar
   where test (TkVar (VarId _))   = True
         test _                   = False
 
-conid :: ISParser s m => m Variable
 conid = satisfy test >>= extractTkVar
   where test (TkVar (ConId _))   = True
         test _                   = False
 
-varsym :: ISParser s m => m Variable
 varsym = satisfy test >>= extractTkVar
   where test (TkVar (VarSym _))  = True
         test _                   = False
 
-consym :: ISParser s m => m Variable
 consym = satisfy test >>= extractTkVar
   where test (TkVar (ConSym _))  = True
         test _                   = False
@@ -67,13 +68,14 @@ literal = satisfy test >>= extract
         extract _            = impossible
 
 --  ### Combinators
+-- #### Concrete Combinators
 var :: ISParser s m => m Variable
 var = varid <|> paren varsym
 
 con :: ISParser s m => m Variable
 con = conid <|> paren consym <|> lit
-  where lit =  (lparen >> rparen >> return (ConSym "()"))
-           <|> (lsquar >> rsquar >> return (ConSym "[]"))
+  where lit =  lparen *> rparen *> return (ConSym "()")
+           <|> lsquar *> rsquar *> return (ConSym "[]")
            <|> paren pTupleCon
         pTupleCon = MP.some (reserved ",") >>= (return . mkTuple . length)
 -- TODO: move mkTuple to a more general position.
@@ -84,35 +86,50 @@ pOp = scope $ (oid <|> sym) >>= return . Op
   where oid = backtick *> varid <|> conid <* backtick
         sym = varsym <|> consym
 
+pConOp :: ISParser s m => m (Op ElemPos)
+pConOp = scope $ (oid <|> sym) >>= return . Op
+  where oid = backtick *> varid <|> conid <* backtick
+        sym = varsym <|> consym
+
+pTyConOp :: ISParser s m => m (Op ElemPos)
+pTyConOp = pConOp <|> arrowOp
+  where arrowOp = scope $ sarrow >>= extractTkVar >>= return . Op
+
+-- #### Abstract Combinators
+
 --    # Non-trivial Combinators
+--   ## Type
+pType :: ISParser s m => m (Type ElemPos)
+pType = pForall <|> pInfix
+  where
+    pForall = do env <- reserved "forall" *> MP.many pVar <* dotsign
+                 ty  <- pInfix
+                 return $ TForall env ty $ elemPos (env, ty)
 
-{-
-%simpletype = $tycon $tyvar*
+    pInfix = pOpType <|> pFType
+      where pOpType = scope $ liftA3 TInfix pFType pTyConOp pType
 
-%type = btype (-> type)
-%btype = (btype) atype
-%atype  = gtycon
-        | tyvar
-        | (type, type, …)
-        | [type]
-        | (type)
+    pFType = do fxs <- MP.some pAType
+                case fxs of
+                  [f]    -> return f
+                  (f:xs) -> return $ TApp f xs $ elemPos fxs
+                  []     -> impossible
 
-gtycon = $tycon
-       | () | [] | (->) -> (,+)
+    pAType = pCon <|> pVar <|> pParened
+      where
+        pCon = scope $ fmap TCon con'
+          where con' = con <|> paren sarrow *> return (ConSym "->")
+        pParened = scope $ paren pType >>= (return . flip updateAST)
 
-pTyVar
-pTyCon
-
-pSimpleType =
--}
+    pVar = scope $ fmap TVar varid
 
 --   ## Pattern
 pPat :: ISParser s m => m (Pat ElemPos)
 pPat = pInfix <|> pLPat
   where
-    pInfix :: ISParser s m => m (Pat ElemPos)
     pInfix = pOpCon <|> pLPat
-      where pOpCon = scope $ liftA3 (flip PInfix) pLPat pOp pPat
+      where pOpCon = scope $ liftA3 PInfix pLPat pConOp pPat
+
     pLPat = pAPat <|> pNeg <|> pFPat
       where
         pNeg = scope $ do _   <- negsign
@@ -141,10 +158,9 @@ pExpr :: ISParser s m => m (Expr ElemPos)
 -- TODO: add support for type ascription, exp :: type
 pExpr = pInfix
   where
-    pInfix :: ISParser s m => m (Expr ElemPos)
     pInfix = pOpExpr <|> pNeg <|> pLExpr
       where
-        pOpExpr = scope $ liftA3 (flip EInfix) pLExpr pOp pInfix
+        pOpExpr = scope $ liftA3 EInfix pLExpr pOp pInfix
         pNeg = scope $ fmap ENeg (negsign *> pInfix)
 
 -- TODO: add support for do-notation [after typeclass]

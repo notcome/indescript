@@ -63,10 +63,13 @@ class GetElemPos a where
 instance GetElemPos ElemPos where
   elemPos = id
 
-instance GetElemPos a => GetElemPos (Pat a) where
+instance GetElemPos a => GetElemPos (Expr a) where
   elemPos = annotation . fmap elemPos
 
-instance GetElemPos a => GetElemPos (Expr a) where
+instance GetElemPos a => GetElemPos (Pat a)  where
+  elemPos = annotation . fmap elemPos
+
+instance GetElemPos a => GetElemPos (Type a) where
   elemPos = annotation . fmap elemPos
 
 instance (GetElemPos a, GetElemPos b) => GetElemPos (a, b) where

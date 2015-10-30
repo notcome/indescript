@@ -22,6 +22,7 @@ data Variable = VarId  String
 data Op a = Op Variable a
           deriving (Eq, Show, Functor, Generic1)
 
+--   ## Expression
 data Expr a = ELam a
             | ELet a
             | EIf  a
@@ -32,21 +33,35 @@ data Expr a = ELam a
             | ELit Literal  a
             | ELOpSec (Op a) (Expr a) a
             | EROpSec (Op a) (Expr a) a
-            | EInfix  (Op a) (Expr a) (Expr a) a
+            | EInfix  (Expr a) (Op a) (Expr a) a
             | ENeg    (Expr a) a
             deriving (Eq, Show, Functor, Generic1)
 
+instance Annotation Expr where
+  annotation = genericAnnotation
 
+--   ## Pattern
 data Pat a = PVar Variable a
            | PAs  (Pat a) (Pat a) a
            | PLit Literal  a
            | PCon Variable a
            | PWildcard a
            | PApp   (Pat a) [Pat a] a
-           | PInfix (Op a) (Pat a) (Pat a) a
+           | PInfix (Pat a) (Op a) (Pat a) a
            deriving (Eq, Show, Functor, Generic1)
 
 instance Annotation Pat where
+  annotation = genericAnnotation
+
+--   ## Type
+data Type a = TVar Variable a
+            | TCon Variable a
+            | TApp    (Type a) [Type a] a
+            | TInfix  (Type a) (Op a) (Type a) a
+            | TForall [Type a] (Type a) a
+            deriving (Eq, Show, Functor, Generic1)
+
+instance Annotation Type where
   annotation = genericAnnotation
 
 -- "Supercombinator" here only refers to functions with
@@ -61,21 +76,6 @@ type Supercomb a = [Equation a]
 instance Annotation Equation where
   annotation = genericAnnotation
 -}
-
-instance Annotation Expr where
-  annotation = genericAnnotation
-
--- TODO: Redesign type repns.
-data Type = TLit    TVar
-          | TVar    TVar
-          | TCon    TCon
-          | TApp    Type Type
-          | TForall [TVar] Type
-          deriving (Eq, Show)
-data TVar = TVStr String
-          | TVSym String
-          deriving (Eq, Ord, Show)
-type TCon    = (TVar, Int)
 
 -- TODO: Redesign those things' repns.
 {-

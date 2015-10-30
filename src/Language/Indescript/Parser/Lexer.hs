@@ -123,7 +123,7 @@ token = triggers <|> right vars <|> right lits <|> right pncs
         keys = [ "let", "in", "where", "case", "of", "do"
                , "if", "then", "else"
                , "infix", "infixl", "infixr"
-               , "data", "type", "newtype", "_"
+               , "data", "type", "forall", "newtype", "_"
                , "class", "instance", "deriving" ]
         ops1 = [":", "::"]
         ops2 = [ "..", "=", "\\", "|", "<-", "->", "@", "~", "=>" ]

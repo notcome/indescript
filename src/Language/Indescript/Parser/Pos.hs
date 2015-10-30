@@ -1,5 +1,6 @@
 module Language.Indescript.Parser.Pos where
 
+--    # Datatypes and Functions
 --   ## SourcePoint
 newtype SourcePoint = SourcePoint { unSourcePoint :: (Int, Int) }
                     deriving (Eq, Ord, Show)
