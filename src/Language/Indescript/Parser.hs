@@ -9,8 +9,8 @@
 module Language.Indescript.Parser where
 
 import Control.Applicative
+import Control.Monad.State (evalState)
 
---import           Text.Megaparsec.ShowToken
 import qualified Text.Megaparsec      as MP
 
 import Language.Indescript.Syntax
@@ -282,18 +282,14 @@ pDecl =  pGenDecl <|> pDecl'
     pRhs = pExpr
     pWhere = reserved "where" *> braceBlock pDecl
 
+--   ## Module
+pModule :: ISParser s m => m [Decl ElemPos]
+pModule = reserved "module" *> reserved "where" *> braceBlock pDecl
+
 --    # Interface
-{-
-parse' parser src input = case lexSource src input of
-  (Left errMsg) -> Left $ show errMsg
-  (Right lexed) -> let lexed' = insertSemicolonBraces lexed
-    in case MP.parse parser src lexed' of
-      (Left errMsg)  -> Left $ show errMsg
-      (Right parsed) -> Right parsed
-  where
-    -- TODO: implement the semicolon brace insertion algorithm
-    insertSemicolonBraces = id
-
-parse = parse' pAtom
-
--}
+parse :: String -> String -> [Decl ElemPos]
+parse srcName input = let
+  (Just tokens)   = lexIndescript input
+  stateMonad      = MP.runParserT pModule srcName tokens
+  (Right program) = evalState stateMonad $ ElemPos pesudoPoint zeroSpan
+  in program

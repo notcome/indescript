@@ -87,6 +87,9 @@ instance GetElemPos a => GetElemPos [a] where
 instance ShowToken Token where
   showToken = show
 
+instance ShowToken ElemPos where
+  showToken = show
+
 instance (ShowToken a, ShowToken b) => ShowToken (a, b) where
   showToken (a, b) = "(" ++ showToken a ++ ", " ++ showToken b ++ ")"
 

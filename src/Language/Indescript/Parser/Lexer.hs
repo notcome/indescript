@@ -124,7 +124,8 @@ token = triggers <|> right vars <|> right lits <|> right pncs
                , "if", "then", "else"
                , "infix", "infixl", "infixr"
                , "data", "type", "forall", "newtype", "_"
-               , "class", "instance", "deriving" ]
+               , "class", "instance", "deriving"
+               , "module", "import"]
         ops1 = [":", "::"]
         ops2 = [ "..", "=", "\\", "|", "<-", "->", "@", "~", "=>" ]
 
