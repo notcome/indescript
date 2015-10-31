@@ -103,33 +103,6 @@ data Decl a = DeclFn (FnLhs a) (Expr a) [Decl a] a
 instance Annotation Decl where
   annotation = genericAnnotation
 
--- "Supercombinator" here only refers to functions with
--- one or more cases.
--- [Supercomb a] stands for where-binding.
-{-
-data Equation a  = EquFn (EVar, a) [Pattern a]             (Expr a) [Supercomb a] a
-                 | EquOp (EOp, a)  (Pattern a) (Pattern a) (Expr a) [Supercomb a] a
-                 deriving (Eq, Show, Functor, Generic1)
-type Supercomb a = [Equation a]
-
-instance Annotation Equation where
-  annotation = genericAnnotation
--}
-
--- TODO: Redesign those things' repns.
-{-
-data AssocType = Infix | InfixL | InfixR deriving (Eq, Show)
-data Fixity a  = Fixity a AssocType Int  deriving (Eq, Show, Functor)
-
-data ADTDecl a = ADTDecl TCon [ADTCon a] a deriving (Eq, Show, Functor)
-data ADTCon  a = ADTCon  ECon [Type]     a deriving (Eq, Show, Functor)
-
-data Decl a = FixityDecl   (Fixity a)    a
-            | FuncDecl     (Supercomb a) a
-            | DataTypeDecl (ADTDecl a)   a
-            deriving (Eq, Show, Functor)
--}
-
 updateAST :: Functor f => b -> f a -> f b
 updateAST x' = fmap $ const x'
 

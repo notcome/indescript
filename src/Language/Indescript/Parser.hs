@@ -11,7 +11,7 @@ module Language.Indescript.Parser where
 import Control.Applicative
 import Control.Monad.State (evalState)
 
-import qualified Text.Megaparsec      as MP
+import qualified Text.Megaparsec as MP
 
 import Language.Indescript.Syntax
 import Language.Indescript.Parser.Prim
@@ -78,12 +78,12 @@ literal = satisfy test >>= extract
 --  ### Combinators
 -- #### Concrete Combinators
 var :: ISParser s m => m Variable
-var = varid <|> paren varsym
+var = varid <|> MP.try (paren varsym)
 
 con :: ISParser s m => m Variable
 con = conid <|> MP.try (paren consym) <|> lit
   where lit =  MP.try (paren pTupleCon)
-           <|> lparen *> rparen *> return (ConSym "()")
+           <|> MP.try (paren $ return (ConSym "()"))
            <|> lsquar *> rsquar *> return (ConSym "[]")
         pTupleCon = MP.some comma >>= (return . mkTuple . length)
 -- TODO: move mkTuple to a more general position.
@@ -94,9 +94,10 @@ pOp = scope $ (oid <|> sym) >>= return . Op
   where oid = backtick *> varid <|> conid <* backtick
         sym = varsym <|> consym
 
-pConOp = scope $ (oid <|> sym) >>= return . Op
+pConOp = scope $ (oid <|> sym <|> lit) >>= return . Op
   where oid = backtick *> varid <|> conid <* backtick
         sym = varsym <|> consym
+        lit = reserved ":" *> return (ConSym ":")
 
 pTyConOp = pConOp <|> arrowOp
   where arrowOp = scope $ sarrow >>= extractTkVar >>= return . Op
@@ -173,7 +174,7 @@ pExpr, pLExpr, pFExpr, pAExpr :: ISParser s m => m (Expr ElemPos)
 -- TODO: add support for type ascription, exp :: type
 pExpr = MP.try pOpExpr <|> pNeg <|> pLExpr
   where
-    pOpExpr = scope $ liftA3 EInfix pLExpr pOp pExpr
+    pOpExpr = scope $ liftA3 EInfix pLExpr (pOp <|> pConOp) pExpr
     pNeg = scope $ fmap ENeg (negsign *> pExpr)
 
 -- TODO: add support for do-notation [after typeclass]
@@ -196,7 +197,7 @@ pFExpr = pFXs pAExpr pAExpr EApp
 
 -- TODO: add support for tuple, list, labeled construction and update, and
 --       consider whether to add arithmetic seqeunce and list comprehension
-pAExpr = scope $  MP.try pVar <|> pCon <|> pLit
+pAExpr = scope $  pVar <|> pCon <|> pLit
               <|> pParened <|> pLOpSec <|> pROpSec
   where
     pVar = fmap EVar var
