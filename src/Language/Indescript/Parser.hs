@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE TypeSynonymInstances      #-}
+{-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 module Language.Indescript.Parser where
 
@@ -40,6 +41,10 @@ darrow = reserved "=>"
 
 --  ### Combinators
 paren p = lparen *> p <* rparen
+brace p = lbrace *> p <* rbrace
+
+-- { p1; p2; ... }
+braceBlock p = brace $ MP.many $ p <* semicolon
 
 --   ## Simple Combinators
 --  ### Extractors
@@ -97,35 +102,39 @@ pTyConOp = pConOp <|> arrowOp
   where arrowOp = scope $ sarrow >>= extractTkVar >>= return . Op
 
 -- #### Abstract Combinators
+pFXs :: (ISParser s m
+        , a ElemPos ~ pa, b ElemPos ~ pb
+        , GetElemPos pa, GetElemPos pb)
+     => m pa -> m pb -> (pa -> [pb] -> ElemPos -> pa) -> m pa
+pFXs pf px comb = liftA2 comb' pf (MP.many px)
+  where comb' f [] = f
+        comb' f xs = comb f xs $ elemPos (f, xs)
 
 --    # Non-trivial Combinators
 --   ## Type
-pType :: ISParser s m => m (Type ElemPos)
+pType, pFType, pAType :: ISParser s m => m (Type ElemPos)
 pType = pForall <|> pInfix
   where
-    pForall = do env <- reserved "forall" *> MP.many pVar <* dotsign
+    pForall = do env <- reserved "forall" *> MP.many pTyVar <* dotsign
                  ty  <- pInfix
                  return $ TForall env ty $ elemPos (env, ty)
 
     pInfix = pOpType <|> pFType
       where pOpType = scope $ liftA3 TInfix pFType pTyConOp pType
 
-    pFType = do fxs <- MP.some pAType
-                case fxs of
-                  [f]    -> return f
-                  (f:xs) -> return $ TApp f xs $ elemPos fxs
-                  []     -> impossible
+pFType = pFXs pAType pAType TApp
 
-    pAType = pCon <|> pVar <|> pParened
-      where
-        pCon = scope $ fmap TCon con'
-          where con' = con <|> paren sarrow *> return (ConSym "->")
-        pParened = scope $ paren pType >>= (return . flip updateAST)
+pAType = pCon <|> pTyVar <|> pParened
+  where
+    pCon = scope $ fmap TCon con'
+      where con' = con <|> paren sarrow *> return (ConSym "->")
+    pParened = scope $ paren pType >>= (return . flip updateAST)
 
-    pVar = scope $ fmap TVar varid
+pTyVar :: ISParser s m => m (Type ElemPos)
+pTyVar = scope $ fmap TVar varid
 
 --   ## Pattern
-pPat :: ISParser s m => m (Pat ElemPos)
+pPat, pAPat :: ISParser s m => m (Pat ElemPos)
 pPat = pInfix <|> pLPat
   where
     pInfix = pOpCon <|> pLPat
@@ -143,7 +152,6 @@ pPat = pInfix <|> pLPat
                            xs <- MP.some pAPat
                            return $ PApp f xs
 
-pAPat :: ISParser s m => m (Pat ElemPos)
 -- TODO: add support for tuple, list, labeled pattern, and irrefutable pattern
 pAPat = pAs <|> pAs' <|> pCon <|> pLit <|> pWildcard <|> pParened
   where
@@ -172,11 +180,7 @@ pExpr = pInfix
         pIf   = undefined
         pCase = undefined
 
-    pFExpr = do fxs <- MP.some pAExpr
-                case fxs of
-                  [f]    -> return f
-                  (f:xs) -> return $ EApp f xs $ elemPos fxs
-                  []     -> impossible
+    pFExpr = pFXs pAExpr pAExpr EApp
 
 -- TODO: add support for tuple, list, labeled construction and update, and
 --       consider whether to add arithmetic seqeunce and list comprehension
@@ -197,7 +201,40 @@ pExpr = pInfix
                               VarSym "-" -> return $ ENeg x
                               _          -> return $ EROpSec op x
 
---    # Declarations
+--    # Declaration
+--   ## Type, Newtype, Data
+-- TODO: add support for type class.
+
+pTypeAlias, pNewType, pDataType :: ISParser s m => m (Decl ElemPos)
+pTypeAlias = scope $ liftA2 DeclTypeAlias pLhs pType
+  where
+    pLhs = reserved "type" *> pSimpleType
+
+-- TODO: add support for the field-like syntax.
+pNewType = scope $ do tyName  <- reserved "newtype" *> pSimpleType
+                      _       <- equal
+                      conName <- scope $ fmap TCon conid
+                      wrapped <- pAType
+                      return $ DeclNewType tyName conName wrapped
+
+pDataType = scope $ liftA2 DeclDataType pLhs pRhs
+  where
+    pLhs = reserved "data" *> pSimpleType
+    pRhs = equal *> (MP.sepBy1 pConstr $ reserved "|")
+      where
+        pConstr = pLConstr <|> pInfix
+          where
+            pLConstr = pFXs pCon pArg TApp
+            pInfix = scope $ liftA3 TInfix pArg pConOp pArg
+            pCon = scope $ fmap TCon con
+            pArg = pFType <|> pAType
+
+pSimpleType :: ISParser s m => m (Type ElemPos)
+pSimpleType = pPrefix <|> pInfix
+  where pPrefix = pFXs (scope $ fmap TCon conid) pTyVar TApp
+        pInfix = scope $ liftA3 TInfix pTyVar pConOp pTyVar
+
+--   ## Function Declaration
 pGenDecl :: ISParser s m => m (Decl ElemPos)
 pGenDecl = scope $ pTypeSig <|> pFixity
   where
@@ -222,7 +259,6 @@ pGenDecl = scope $ pTypeSig <|> pFixity
 
         pOps = MP.sepBy1 pOp comma
 
-
 pDecl :: ISParser s m => m (Decl ElemPos)
 pDecl =  pGenDecl <|> pDecl'
   where
@@ -244,9 +280,7 @@ pDecl =  pGenDecl <|> pDecl'
 
 -- TODO: add support for guard expression.
     pRhs = pExpr
-    pWhere = reserved "where" *> lbrace *> pClauses <* rbrace
-      where
-        pClauses =  MP.many (pDecl <* semicolon)
+    pWhere = reserved "where" *> braceBlock pDecl
 
 --    # Interface
 {-

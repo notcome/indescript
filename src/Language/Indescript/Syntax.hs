@@ -89,6 +89,9 @@ instance Annotation FnLhs where
 data Decl a = DeclFn (FnLhs a) (Expr a) [Decl a] a
             | DeclTypeSig [Var a] (Type a) a
             | DeclFixity  (Fixity a) a
+            | DeclTypeAlias (Type a) (Type a) a
+            | DeclNewType   (Type a) (Type a) (Type a) a
+            | DeclDataType  (Type a) [Type a] a
             deriving (Eq, Show, Functor, Generic1)
 
 instance Annotation Decl where
