@@ -23,10 +23,16 @@ data Op a = Op Variable a
           deriving (Eq, Show, Functor, Generic1)
 
 --   ## Expression
-data Expr a = ELam a
-            | ELet a
-            | EIf  a
-            | ECase a
+data Alt a = EAlt (Pat a) (Expr a) [Decl a] a
+           deriving (Eq, Show, Functor, Generic1)
+
+instance Annotation Alt where
+  annotation = genericAnnotation
+
+data Expr a = ELam [Pat a]  (Expr a) a
+            | ELet [Decl a] (Expr a) a
+            | EIf  (Expr a) (Expr a) (Expr a) a
+            | ECase (Expr a) [Alt a] a
             | EApp (Expr a) [Expr a] a
             | EVar Variable a
             | ECon Variable a

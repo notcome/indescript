@@ -115,7 +115,7 @@ token = triggers <|> right vars <|> right lits <|> right pncs
     vars =  reserve VarId  keys <$> pVarId
         <|> reserve ConId  []   <$> pConId
         <|> reserve ConSym ops1 <$> pConSym
-        <|> reserve ConSym ops2 <$> pVarSym
+        <|> reserve VarSym ops2 <$> pVarSym
       where
         reserve con set x = if x `elem` set
                             then (TkRsv x,       length x)

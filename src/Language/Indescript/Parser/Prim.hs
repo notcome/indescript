@@ -56,6 +56,7 @@ token :: ISParser s m => Token -> m PosedToken
 token t = satisfy (== t)
 
 reserved = token . TkRsv
+punc     = token . TkPnc
 
 class GetElemPos a where
   elemPos :: a -> ElemPos

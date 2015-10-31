@@ -21,19 +21,19 @@ import Language.Indescript.Parser.Lexer
 --    # Primitives
 --   ## Special Characters
 --  ### Literal Values
-lparen = reserved "("
-rparen = reserved "("
-lsquar = reserved "["
-rsquar = reserved "]"
-lbrace = reserved "{"
-rbrace = reserved "}"
+lparen = punc '('
+rparen = punc ')'
+lsquar = punc '['
+rsquar = punc ']'
+lbrace = punc '{'
+rbrace = punc '}'
+
+backtick  = punc '`'
+semicolon = punc ';'
+comma     = punc ','
 
 negsign = token $ TkVar $ VarSym "-"
 dotsign = token $ TkVar $ VarSym "."
-
-backtick  = reserved "`"
-semicolon = reserved ";"
-comma     = reserved ","
 
 equal  = reserved "="
 sarrow = reserved "->"
@@ -81,11 +81,11 @@ var :: ISParser s m => m Variable
 var = varid <|> paren varsym
 
 con :: ISParser s m => m Variable
-con = conid <|> paren consym <|> lit
-  where lit =  lparen *> rparen *> return (ConSym "()")
+con = conid <|> MP.try (paren consym) <|> lit
+  where lit =  MP.try (paren pTupleCon)
+           <|> lparen *> rparen *> return (ConSym "()")
            <|> lsquar *> rsquar *> return (ConSym "[]")
-           <|> paren pTupleCon
-        pTupleCon = MP.some (reserved ",") >>= (return . mkTuple . length)
+        pTupleCon = MP.some comma >>= (return . mkTuple . length)
 -- TODO: move mkTuple to a more general position.
         mkTuple n = ConSym $ "(" ++ replicate n ',' ++ ")"
 
@@ -100,6 +100,12 @@ pConOp = scope $ (oid <|> sym) >>= return . Op
 
 pTyConOp = pConOp <|> arrowOp
   where arrowOp = scope $ sarrow >>= extractTkVar >>= return . Op
+
+pWhere :: ISParser s m => m [Decl ElemPos]
+pWhere = toList <$> optional (reserved "where" *> braceBlock pDecl)
+  where
+    toList Nothing   = []
+    toList (Just xs) = xs
 
 -- #### Abstract Combinators
 pFXs :: (ISParser s m
@@ -163,43 +169,47 @@ pAPat = pAs <|> pAs' <|> pCon <|> pLit <|> pWildcard <|> pParened
     pParened  = scope $ paren pPat >>= return . flip updateAST
 
 --   ## Expression
-pExpr :: ISParser s m => m (Expr ElemPos)
+pExpr, pLExpr, pFExpr, pAExpr :: ISParser s m => m (Expr ElemPos)
 -- TODO: add support for type ascription, exp :: type
-pExpr = pInfix
+pExpr = MP.try pOpExpr <|> pNeg <|> pLExpr
   where
-    pInfix = pOpExpr <|> pNeg <|> pLExpr
-      where
-        pOpExpr = scope $ liftA3 EInfix pLExpr pOp pInfix
-        pNeg = scope $ fmap ENeg (negsign *> pInfix)
+    pOpExpr = scope $ liftA3 EInfix pLExpr pOp pExpr
+    pNeg = scope $ fmap ENeg (negsign *> pExpr)
 
 -- TODO: add support for do-notation [after typeclass]
-    pLExpr = pLam <|> pLet <|> pIf <|> pCase {-<|> pDo-} <|> pFExpr
-      where
-        pLam  = undefined
-        pLet  = undefined
-        pIf   = undefined
-        pCase = undefined
+pLExpr = pLExpr' <|> pFExpr
+  where
+    pLExpr' = scope $ pLam <|> pLet <|> pIf <|> pCase {-<|> pDo-}
 
-    pFExpr = pFXs pAExpr pAExpr EApp
+    pLam = liftA2 ELam (reserved "\\"   *> MP.some pAPat)
+                               (sarrow          *> pExpr)
+    pLet = liftA2 ELet (reserved "let"  *> braceBlock pDecl)
+                               (reserved "in"   *> pExpr)
+    pIf  = liftA3 EIf  (reserved "if"   *> pExpr)
+                       (reserved "then" *> pExpr)
+                       (reserved "else" *> pExpr)
+    pCase = liftA2 ECase (reserved "case" *> pExpr)
+                                 (reserved "of"   *> braceBlock pAlt)
+      where pAlt = scope $ liftA3 EAlt pPat (sarrow *> pExpr) pWhere
+
+pFExpr = pFXs pAExpr pAExpr EApp
 
 -- TODO: add support for tuple, list, labeled construction and update, and
 --       consider whether to add arithmetic seqeunce and list comprehension
-    pAExpr = scope $ pVar <|> pCon <|> pLit <|> pParened <|> pLOpSec <|> pROpSec
-      where
-        pVar = fmap EVar var
-        pCon = fmap ECon con
-        pLit = fmap ELit literal
-        pParened = paren pExpr >>= (return . flip updateAST)
-        pLOpSec = paren parser
-          where parser = do x  <- pInfix
-                            op <- pOp
-                            return $ ELOpSec op x
-        pROpSec = paren parser
-          where parser = do op@(Op opv _) <- pOp
-                            x <- pInfix
-                            case opv of
-                              VarSym "-" -> return $ ENeg x
-                              _          -> return $ EROpSec op x
+pAExpr = scope $  MP.try pVar <|> pCon <|> pLit
+              <|> pParened <|> pLOpSec <|> pROpSec
+  where
+    pVar = fmap EVar var
+    pCon = fmap ECon con
+    pLit = fmap ELit literal
+    pParened = paren pExpr >>= (return . flip updateAST)
+    pLOpSec = paren $ liftA2 (flip ELOpSec) pExpr pOp
+    pROpSec = paren parser
+      where parser = do op@(Op opv _) <- pOp
+                        x <- pExpr
+                        case opv of
+                          VarSym "-" -> return $ ENeg x
+                          _          -> return $ EROpSec op x
 
 --    # Declaration
 --   ## Type, Newtype, Data
@@ -260,14 +270,10 @@ pGenDecl = scope $ pTypeSig <|> pFixity
         pOps = MP.sepBy1 pOp comma
 
 pDecl :: ISParser s m => m (Decl ElemPos)
-pDecl =  pGenDecl <|> pDecl'
+pDecl =  MP.try pGenDecl <|> pDecl'
   where
-    pDecl' = scope (liftA3 mkDeclFn pLhs (equal *> pRhs) (optional pWhere))
-
-    mkDeclFn lhs rhs Nothing   = DeclFn lhs rhs []
-    mkDeclFn lhs rhs (Just ws) = DeclFn lhs rhs ws
-
-    pLhs = pOpLhs <|> pLLhs
+    pDecl' = scope $ liftA3 DeclFn pLhs (equal *> pRhs) pWhere
+    pLhs = MP.try pOpLhs <|> pLLhs
       where
         pOpLhs = scope $ liftA3 FnOp pPat pOp pPat
         pLLhs  = p1 <|> p2
@@ -280,16 +286,24 @@ pDecl =  pGenDecl <|> pDecl'
 
 -- TODO: add support for guard expression.
     pRhs = pExpr
-    pWhere = reserved "where" *> braceBlock pDecl
 
+pTopDecl :: ISParser s m => m (Decl ElemPos)
+pTopDecl = pTypeAlias <|> pNewType <|> pDataType <|> pDecl
 --   ## Module
 pModule :: ISParser s m => m [Decl ElemPos]
-pModule = reserved "module" *> reserved "where" *> braceBlock pDecl
+pModule = reserved "module" *> reserved "where" *> braceBlock pTopDecl
 
 --    # Interface
+parse' parser srcName input = let
+  (Just tokens)  = lexIndescript input
+  stateMonad     = MP.runParserT parser srcName tokens
+  (Right result) = evalState stateMonad $ ElemPos pesudoPoint zeroSpan
+  in result
+
+testParse parser input = let
+  (Just tokens)  = lexIndescript input
+  stateMonad     = MP.runParserT parser "(test)" tokens
+  in evalState stateMonad $ ElemPos pesudoPoint zeroSpan
+
 parse :: String -> String -> [Decl ElemPos]
-parse srcName input = let
-  (Just tokens)   = lexIndescript input
-  stateMonad      = MP.runParserT pModule srcName tokens
-  (Right program) = evalState stateMonad $ ElemPos pesudoPoint zeroSpan
-  in program
+parse = parse' pModule

@@ -19,6 +19,7 @@ library
                      , Language.Indescript.Parser.Pos
                      , Language.Indescript.Parser.Lexer
                      , Language.Indescript.Parser
+                     , Language.Indescript.Parser.Test
                      , Language.Indescript.Syntax
                      , Language.Indescript.Parser.Prim
                      , Data.Annotation
