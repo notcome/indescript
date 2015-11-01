@@ -10,6 +10,7 @@ import Language.Indescript.Syntax
 import Language.Indescript.Parser
 
 test = do
+  putStrLn "\nTest.Parser.SimpleCombinators"
   runTestTT testExpr
   runTestTT testPat
   runTestTT testType
@@ -26,6 +27,7 @@ testExpr = group "Expr" [simple, complex]
       , ass "(+)"   ==> plus
       , ass "(:+:)" ==> conPlus
       , ass "()"    ==> unit
+      , ass "(:)"   ==> cons
       , ass "[]"    ==> list
       , ass "(,)"   ==> tuple
 
@@ -40,6 +42,7 @@ testExpr = group "Expr" [simple, complex]
     plus    = EVar (VarSym "+")   ()
     conPlus = ECon (ConSym ":+:") ()
     unit    = ECon (ConSym "()")  ()
+    cons    = ECon (ConSym ":")   ()
     list    = ECon (ConSym "[]")  ()
     tuple   = ECon (ConSym "(,)") ()
 

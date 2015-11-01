@@ -77,27 +77,27 @@ literal = satisfy test >>= extract
 
 --  ### Combinators
 -- #### Concrete Combinators
-var :: ISParser s m => m Variable
-var = varid <|> MP.try (paren varsym)
-
-con :: ISParser s m => m Variable
-con = conid <|> MP.try (paren consym) <|> lit
-  where lit =  MP.try (paren pTupleCon)
-           <|> MP.try (paren $ return (ConSym "()"))
-           <|> lsquar *> rsquar *> return (ConSym "[]")
-        pTupleCon = MP.some comma >>= (return . mkTuple . length)
+litCon, cons, var, con :: ISParser s m => m Variable
+litCon =  MP.try (paren pTupleCon)
+      <|> MP.try (paren $ return (ConSym "()"))
+      <|> lsquar *> rsquar *> return (ConSym "[]")
+  where
+    pTupleCon = MP.some comma >>= (return . mkTuple . length)
 -- TODO: move mkTuple to a more general position.
-        mkTuple n = ConSym $ "(" ++ replicate n ',' ++ ")"
+    mkTuple n = ConSym $ "(" ++ replicate n ',' ++ ")"
+
+cons = reserved ":" *> return (ConSym ":")
+var  = varid <|> MP.try (paren varsym)
+con  = conid <|> MP.try (paren (consym <|> cons)) <|> litCon
 
 pOp, pConOp, pTyConOp :: ISParser s m => m (Op ElemPos)
 pOp = scope $ (oid <|> sym) >>= return . Op
   where oid = backtick *> (varid <|> conid) <* backtick
         sym = varsym <|> consym
 
-pConOp = scope $ (oid <|> sym <|> lit) >>= return . Op
+pConOp = scope $ (oid <|> sym <|> cons) >>= return . Op
   where oid = backtick *> conid <* backtick
         sym = varsym <|> consym
-        lit = reserved ":" *> return (ConSym ":")
 
 pTyConOp = pConOp <|> arrowOp
   where arrowOp = scope $ sarrow *> return (Op $ ConSym "->")
@@ -247,12 +247,14 @@ pGenDecl :: ISParser s m => m (Decl ElemPos)
 pGenDecl = scope $ pTypeSig <|> pFixity
   where
 -- TODO: add support for type signature with context.
-    pTypeSig = liftA2 DeclTypeSig pVars pType
-      where pVars = MP.sepBy1 (scope $ fmap Var var) comma
+    pTypeSig = liftA2 DeclTypeSig pVars (reserved "::" *> pType)
+      where pVars = MP.sepBy1 pVar comma
+            pVar  = scope $ fmap Var (var <|> con)
     pFixity  = fmap DeclFixity pFixity'
       where
-        pFixity' = scope $  liftA2 Fixity pAssocType pOps
-                        <|> liftA3 FixityLv pAssocType pInt pOps
+        pFixity' = scope $ liftA3 mkFixity pAssocType (MP.optional pInt) pOps
+        mkFixity at Nothing  ops = Fixity at ops
+        mkFixity at (Just l) ops = FixityLv at l ops
 
         pAssocType =  reserved "infixl" *> return InfixL
                   <|> reserved "infixr" *> return InfixR

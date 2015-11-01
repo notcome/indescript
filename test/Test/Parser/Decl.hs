@@ -10,7 +10,9 @@ import Language.Indescript.Syntax
 import Language.Indescript.Parser
 
 test = do
+  putStrLn "\nTest.Parser.Decl"
   runTestTT testTypeDecl
+  runTestTT testGenDecl
 
 testTypeDecl = group "Type Decl" [simpleType, typeAlias, newtype', dataType]
   where
@@ -78,3 +80,28 @@ testTypeDecl = group "Type Decl" [simpleType, typeAlias, newtype', dataType]
                                , TCon (ConId "Nothing") ()] ()
     adt2 = DeclDataType treeA [ wrapper "Leaf" "a", branchTT ] ()
     adt3 = DeclDataType treeA [ tPlusT, branchTT ] ()
+
+testGenDecl = group "Gen Decl" [fixity, typeSig]
+  where
+    fixity = group "Fixity Decl" [
+        ass "infixl +"        ==> fix1
+      , ass "infixl :+:"      ==> fix2
+      , ass "infixl 3 :+:, +" ==> fix3
+      ] where ass = testParse pGenDecl
+
+    plus    = Op (VarSym "+") ()
+    conPlus = Op (ConSym ":+:") ()
+
+    fix1 = DeclFixity (Fixity InfixL [plus] ()) ()
+    fix2 = DeclFixity (Fixity InfixL [conPlus] ()) ()
+    fix3 = DeclFixity (FixityLv InfixL 3 [conPlus, plus] ()) ()
+
+    typeSig = group "Type Signature" [
+        ass "(:+:), foo, Bar :: Int" ==> sig1
+      ] where ass = testParse pGenDecl
+
+    sig1 = DeclTypeSig vars (TCon (ConId "Int") ()) ()
+      where vars = [ Var (ConSym ":+:") ()
+                   , Var (VarId "foo") ()
+                   , Var (ConId "Bar") ()
+                   ]
