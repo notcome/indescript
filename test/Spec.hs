@@ -15,6 +15,7 @@ main :: IO ()
 main = do
   runTestTT testExpr
   runTestTT testPat
+  runTestTT testType
   return ()
 
 testExpr = group "Expr" [simple, complex]
@@ -189,3 +190,77 @@ testPat = group "Pat" [simple, complex]
       where rhs = PApp _bar [pi_, pi_] ()
     cmpx3           = PAs foo rhs ()
       where rhs = PInfix list_2foo opPlus _bar_2pi_as_foo ()
+
+testType = group "Type" [simple, complex]
+  where
+    simple = group "Simple Type"
+      [atypeSimp, ftypeSimp, typeSimp]
+    complex = group "Complex Type" cmpxType
+
+    atypeSimp = group "AType Simple" [
+        ass "m"    ==> monad
+      , ass "Int"  ==> int
+      , ass "()"   ==> unit
+      , ass "[]"   ==> list
+      , ass "(,)"  ==> tuple
+      , ass "(->)" ==> arrow
+      ] where ass = testParse pAType
+
+    monad = TVar (VarId "m") ()
+    int   = TCon (ConId "Int") ()
+    unit  = TCon (ConSym "()") ()
+    list  = TCon (ConSym "[]") ()
+    tuple = TCon (ConSym "(,)") ()
+    arrow = TCon (ConSym "->") ()
+
+    ftypeSimp = group "FType Simple" [
+        ass "m"      ==> monad
+      , ass "m Int"  ==> mInt
+      , ass "[] Int" ==> listInt
+      , ass sI2I     ==> int2Int
+      ] where ass = testParse pFType
+
+    sI2I    = "(->) Int Int"
+    mInt    = TApp monad [int] ()
+    listInt = TApp list [int] ()
+    int2Int = TApp arrow [int, int] ()
+
+    typeSimp = group "Type Simple" [
+        ass "Int"   ==> int
+      , ass "(Int)" ==> int
+      , ass sI2I    ==> int2Int
+      , ass sI2I'   ==> int2Int'
+      , ass sEither ==> either2Int
+      , ass sPlus   ==> plus2Int
+      , ass sForall ==> forall
+      ] where ass = testParse pType
+
+    sI2I'    = "Int -> Int"
+    sEither  = "Int `Either` Int"
+    sPlus    = "Int :+: Int"
+    sForall  = "forall m. m Int"
+
+    tconPlus   = Op (ConSym ":+:") ()
+    tconEither = Op (ConId "Either") ()
+    arrowOp    = Op (ConSym "->") ()
+    int2Int'   = TInfix int arrowOp int ()
+    either2Int = TInfix int tconEither int ()
+    plus2Int   = TInfix int tconPlus int ()
+    forall     = TForall [monad] mInt ()
+
+    cmpxType = [
+        ass sCmpx1   ==> cmpx1
+      , ass sCmpx1'  ==> cmpx1
+      , ass sCmpx1'' ==> cmpx1
+      , ass "(Int)"  ==> int
+      , ass sCmpx2   ==> cmpx2
+      ] where ass = testParse pType
+
+    sCmpx1   = "Int -> Int -> Int"
+    sCmpx1'  = "Int -> (Int -> Int)"
+    sCmpx1'' = "(Int -> Int -> Int)"
+    sCmpx2   = "m Int -> m ()"
+
+    cmpx1 = TInfix int arrowOp int2Int' ()
+    cmpx2 = TInfix mInt arrowOp mUnit ()
+      where mUnit = TApp monad [unit] ()

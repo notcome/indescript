@@ -91,16 +91,16 @@ con = conid <|> MP.try (paren consym) <|> lit
 
 pOp, pConOp, pTyConOp :: ISParser s m => m (Op ElemPos)
 pOp = scope $ (oid <|> sym) >>= return . Op
-  where oid = backtick *> varid <|> conid <* backtick
+  where oid = backtick *> (varid <|> conid) <* backtick
         sym = varsym <|> consym
 
 pConOp = scope $ (oid <|> sym <|> lit) >>= return . Op
-  where oid = backtick *> varid <|> conid <* backtick
+  where oid = backtick *> conid <* backtick
         sym = varsym <|> consym
         lit = reserved ":" *> return (ConSym ":")
 
 pTyConOp = pConOp <|> arrowOp
-  where arrowOp = scope $ sarrow >>= extractTkVar >>= return . Op
+  where arrowOp = scope $ sarrow *> return (Op $ ConSym "->")
 
 pWhere :: ISParser s m => m [Decl ElemPos]
 pWhere = toList <$> optional (reserved "where" *> braceBlock pDecl)
@@ -126,7 +126,7 @@ pType = pForall <|> pInfix
                  ty  <- pInfix
                  return $ TForall env ty $ elemPos (env, ty)
 
-    pInfix = pOpType <|> pFType
+    pInfix = MP.try pOpType <|> pFType
       where pOpType = scope $ liftA3 TInfix pFType pTyConOp pType
 
 pFType = pFXs pAType pAType TApp
@@ -134,7 +134,8 @@ pFType = pFXs pAType pAType TApp
 pAType = pCon <|> pTyVar <|> pParened
   where
     pCon = scope $ fmap TCon con'
-      where con' = con <|> paren sarrow *> return (ConSym "->")
+      where con'    = con <|> MP.try pSArrow
+            pSArrow = paren sarrow *> return (ConSym "->")
     pParened = scope $ paren pType >>= (return . flip updateAST)
 
 pTyVar :: ISParser s m => m (Type ElemPos)
