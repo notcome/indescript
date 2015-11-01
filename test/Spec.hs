@@ -14,6 +14,7 @@ group str tests = TestLabel str $ TestList tests
 main :: IO ()
 main = do
   runTestTT testExpr
+  runTestTT testPat
   return ()
 
 testExpr = group "Expr" [simple, complex]
@@ -116,3 +117,75 @@ testExpr = group "Expr" [simple, complex]
               " then (" ++ sIfThen1   ++
               ") else " ++ "-999"
     cmpxExpr2   = EIf cmpxExpr1 ifThen1 neg_999 ()
+
+testPat = group "Pat" [simple, complex]
+  where
+    simple = group "Simple Pattern"
+      [apatSimp, fpatSimp, lpatSimp, patSimp]
+    complex = group "Complex Pattern" cmpxExpr
+
+    apatSimp = group "APat Simple" [
+        ass "foo"  ==> foo
+      , ass "Bar"  ==> _bar
+      , ass "3.14" ==> pi_
+      , ass "_"    ==> PWildcard ()
+      , ass "()"   ==> unit
+      , ass "[]"   ==> list
+      , ass "(:+)" ==> plus
+      ] where ass = testParse pAPat
+
+    foo  = PVar (VarId "foo") ()
+    _bar = PCon (ConId "Bar") ()
+    pi_  = PLit (LFloat 3.14) ()
+    unit = PCon (ConSym "()") ()
+    list = PCon (ConSym "[]") ()
+    plus = PCon (ConSym ":+") ()
+
+    fpatSimp = group "FPat Simple" [
+        ass "Bar foo 3.14"  ==> _bar_foo_pi
+      , ass "(:+) foo 3.14" ==> plus_foo_pi
+      ] where ass = testParse pFPat
+
+    _bar_foo_pi = PApp _bar [foo, pi_] ()
+    plus_foo_pi = PApp plus [foo, pi_] ()
+
+    lpatSimp = group "LPat Simple" [
+        ass "foo"           ==> foo
+      , ass "Bar foo 3.14"  ==> _bar_foo_pi
+      , ass "(:+) foo 3.14" ==> plus_foo_pi
+      , ass "-999"          ==> neg_999
+      , ass "-3.14"         ==> neg_pi
+      ] where ass = testParse pLPat
+
+    neg_999 = PLit (LInt (-999)) ()
+    neg_pi  = PLit (LFloat (-3.14)) ()
+
+    patSimp = group "Pat Simple" [
+        ass "-999"         ==> neg_999
+      , ass "3.14"         ==> pi_
+      , ass "foo : []"     ==> list_foo
+      , ass "-999 :+ 3.14" ==> _999_plus_pi
+      ] where ass = testParse pPat
+
+    opPlus       = Op (ConSym ":+") ()
+    opCons       = Op (ConSym ":") ()
+    list_foo     = PInfix foo opCons list ()
+    _999_plus_pi = PInfix neg_999 opPlus pi_ ()
+
+    cmpxExpr = [
+        ass "foo@(-999)" ==> neg_999_as_foo
+      , ass sCmpx1       ==> list_2foo
+      , ass sCmpx2       ==> _bar_2pi_as_foo
+      , ass sCmpx3       ==> cmpx3
+      ] where ass = testParse pPat
+
+    sCmpx1 = "foo:foo:[]"
+    sCmpx2 = "foo@(Bar 3.14 3.14)"
+    sCmpx3 = "foo@((" ++ sCmpx1 ++ ") :+ " ++ sCmpx2 ++ ")"
+
+    neg_999_as_foo  = PAs foo neg_999 ()
+    list_2foo       = PInfix foo opCons list_foo ()
+    _bar_2pi_as_foo = PAs foo rhs ()
+      where rhs = PApp _bar [pi_, pi_] ()
+    cmpx3           = PAs foo rhs ()
+      where rhs = PInfix list_2foo opPlus _bar_2pi_as_foo ()

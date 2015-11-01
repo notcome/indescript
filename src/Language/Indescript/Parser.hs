@@ -141,29 +141,27 @@ pTyVar :: ISParser s m => m (Type ElemPos)
 pTyVar = scope $ fmap TVar varid
 
 --   ## Pattern
-pPat, pAPat :: ISParser s m => m (Pat ElemPos)
-pPat = pInfix <|> pLPat
+pPat, pLPat, pFPat, pAPat :: ISParser s m => m (Pat ElemPos)
+pPat = MP.try pOpCon <|> pLPat
   where
-    pInfix = pOpCon <|> pLPat
-      where pOpCon = scope $ liftA3 PInfix pLPat pConOp pPat
+    pOpCon = scope $ liftA3 PInfix pLPat pConOp pPat
 
-    pLPat = pAPat <|> pNeg <|> pFPat
-      where
-        pNeg = scope $ do _   <- negsign
-                          lit <- literal
-                          case lit of
-                            LInt   n -> return $ PLit $ LInt   (-n)
-                            LFloat n -> return $ PLit $ LFloat (-n)
-                            _        -> fail "expected a number."
-        pFPat = scope $ do f  <- scope $ fmap PCon con
-                           xs <- MP.some pAPat
-                           return $ PApp f xs
+pLPat = pFPat <|> pAPat <|> pNeg
+  where
+    pNeg = scope $ do _   <- negsign
+                      lit <- literal
+                      case lit of
+                        LInt   n -> return $ PLit $ LInt   (-n)
+                        LFloat n -> return $ PLit $ LFloat (-n)
+                        _        -> fail "expected a number."
+
+pFPat = pFXs (scope $ fmap PCon con) pAPat PApp
 
 -- TODO: add support for tuple, list, labeled pattern, and irrefutable pattern
-pAPat = pAs <|> pAs' <|> pCon <|> pLit <|> pWildcard <|> pParened
+pAPat = MP.try pAs' <|> pAs <|> pCon <|> pLit <|> pWildcard <|> pParened
   where
     pAs  = scope $ fmap PVar var
-    pAs' = scope $ liftA2 PAs pAs (reserved "a" *> pAPat)
+    pAs' = scope $ liftA2 PAs pAs (reserved "@" *> pAPat)
     pCon = scope $ fmap PCon con
     pLit = scope $ fmap PLit literal
     pWildcard = scope $ reserved "_" *> return PWildcard
