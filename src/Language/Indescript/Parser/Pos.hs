@@ -3,7 +3,7 @@ module Language.Indescript.Parser.Pos where
 --    # Datatypes and Functions
 --   ## SourcePoint
 newtype SourcePoint = SourcePoint { unSourcePoint :: (Int, Int) }
-                    deriving (Eq, Ord, Show)
+                    deriving (Eq, Ord)
 
 pesudoPoint :: SourcePoint
 pesudoPoint = SourcePoint (-1, -1)
@@ -37,7 +37,7 @@ data ElemPos = ElemPos
              { startPoint :: SourcePoint
              , elemSpan   :: SourceSpan
 -- TODO: implement a better show instance.
-             } deriving (Eq, Show)
+             } deriving Eq
 
 --  ### Accessors
 endPoint :: ElemPos -> SourcePoint
@@ -60,3 +60,15 @@ diffPoint p0 p1 = let
   dr = srcRow p1 - srcRow p0
   dc = srcCol p1 - srcCol p0
   in SourceSpan (dr, dc)
+
+--   ## Show Instance
+instance Show SourcePoint where
+  show point = "l." ++ show (srcRow point) ++
+              " c." ++ show (srcCol point)
+
+instance Show ElemPos where
+  show pos = let sp = startPoint pos
+                 ep = endPoint   pos
+             in if srcRow sp == srcRow ep
+                then show (startPoint pos) ++ " - " ++ show (srcCol ep)
+                else show (startPoint pos) ++ " - " ++ show (endPoint pos)

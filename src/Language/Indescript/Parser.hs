@@ -18,19 +18,21 @@ import Language.Indescript.Parser.Prim
 import Language.Indescript.Parser.Pos
 import Language.Indescript.Parser.Lexer
 
+import Debug.Trace
+
 --    # Primitives
 --   ## Special Characters
 --  ### Literal Values
-lparen = punc '('
-rparen = punc ')'
-lsquar = punc '['
-rsquar = punc ']'
-lbrace = punc '{'
-rbrace = punc '}'
+lparen = reserved "("
+rparen = reserved ")"
+lsquar = reserved "["
+rsquar = reserved "]"
+lbrace = reserved "{"
+rbrace = reserved "}"
 
-backtick  = punc '`'
-semicolon = punc ';'
-comma     = punc ','
+backtick  = reserved "`"
+semicolon = reserved ";"
+comma     = reserved ","
 
 negsign = token $ TkVar $ VarSym "-"
 dotsign = token $ TkVar $ VarSym "."
@@ -44,7 +46,11 @@ paren p = lparen *> p <* rparen
 brace p = lbrace *> p <* rbrace
 
 -- { p1; p2; ... }
-braceBlock p = brace $ MP.many $ p <* semicolon
+-- TODO: wait until the next release of megaparsec.
+braceBlock p = brace $ sepEndBy p semicolon
+  where
+    sepEndBy p sep = sepEndBy1 p sep <|> pure []
+    sepEndBy1 p sep = (:) <$> p <*> ((sep *> sepEndBy p sep) <|> pure [])
 
 --   ## Simple Combinators
 --  ### Extractors
@@ -182,14 +188,15 @@ pLExpr = pLExpr' <|> pFExpr
     pLExpr' = scope $ pLam <|> pLet <|> pIf <|> pCase {-<|> pDo-}
 
     pLam = liftA2 ELam (reserved "\\"   *> MP.some pAPat)
-                               (sarrow          *> pExpr)
+                       (sarrow          *> pExpr)
     pLet = liftA2 ELet (reserved "let"  *> braceBlock pDecl)
-                               (reserved "in"   *> pExpr)
+                       (reserved "in"   *> pExpr)
+-- TODO: add support for optionl semicolon.
     pIf  = liftA3 EIf  (reserved "if"   *> pExpr)
                        (reserved "then" *> pExpr)
                        (reserved "else" *> pExpr)
     pCase = liftA2 ECase (reserved "case" *> pExpr)
-                                 (reserved "of"   *> braceBlock pAlt)
+                         (reserved "of"   *> braceBlock pAlt)
       where pAlt = scope $ liftA3 EAlt pPat (sarrow *> pExpr) pWhere
 
 pFExpr = pFXs pAExpr pAExpr EApp
@@ -278,7 +285,7 @@ pDecl =  MP.try pGenDecl <|> pDecl'
         pOpLhs = scope $ liftA3 FnOp pPat pOp pPat
         pLLhs  = p1 <|> p2
           where
-            p1 = scope $ liftA2 FnArgs var' (MP.some pAPat)
+            p1 = scope $ liftA2 FnArgs var' (MP.many pAPat)
               where var' = scope $ fmap Var var
             p2 = scope $ do (FnArgs f xs _) <- paren p1
                             rest            <- MP.some pAPat

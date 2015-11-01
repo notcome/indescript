@@ -132,7 +132,7 @@ token = triggers <|> right vars <|> right lits <|> right pncs
     lits = fmap tokenify (pInteger <|> pFloat)
       where tokenify (lit, w) = (TkLit lit, w)
 
-    pncs = flip fmap pSpecial $ fmap (, 1) TkPnc
+    pncs = flip fmap pSpecial $ fmap (, 1) (TkRsv . (:[]))
 
     white = (Left . TrWhite . toInt) <$> some cWhite
       where
@@ -187,7 +187,7 @@ insertIndents (tok:toks) = case indent (tok:toks) of
 
 --  ### Layout Algorithm
 -- A direct translation of the layout algorithm presented
--- in the Haskell 2010 Language Report.
+-- in the Haskell 2010 Language Report. Modified to handle “in”.
 layout :: [Either Indent (Token, ElemPos)] -> [Int] -> Maybe [(Token, ElemPos)]
 -- L (<n>:ts) (m:ms) = ; : (L ts (m:ms))   if m = n
 --                   = } : (L (<n>):ts ms) if n < m
@@ -204,10 +204,18 @@ layout ((Left (SameLv _)):ts) ms
 layout ((Left (NextLv n)):ts) (m:ms)
   | n > m  = (lbrace:)    <$> layout ts  (n:m:ms)
 layout ((Left (NextLv n)):ts) []
-  | n > 0  = layout ts  [n]
+  | n > 0  = (lbrace:)    <$> layout ts  [n]
 layout ((Left (NextLv n)):ts) ms = do
   rest <- layout (Left (SameLv n):ts) ms
   return $ lbrace:rbrace:rest
+
+-- Special rule for “in”:
+-- L (t:in:ts) (m:ms) = } : L (in:ts ms) if t ≠ { and m ≠ 0
+layout ((Right t):in_@(Right (TkRsv "in", _)):ts) (m:ms)
+  | notRBrace t, m /= 0 = prefix <$> layout (in_:ts) ms
+  where notRBrace (TkRsv "}", _) = False
+        notRBrace _              = True
+        prefix ts' = t:rbrace:ts'
 
 -- L (}:ts) (0:ms) = } : (L ts ms)
 -- L (}:ts) ms     = parse-error
@@ -219,8 +227,10 @@ layout ((Right    (TkRsv "}", _)):_)  _
            = Nothing
 layout ((Right lb@(TkRsv "{", _)):ts) ms
            = (lb:)        <$> layout ts  (0:ms)
+-- A parse-error only occurs when an explicit right brace matches a non-explicit
+-- left brace, as guarded below.
 layout tts@(t:_) (m:ms)
-  | m /= 0, Nothing <- layout [t] (m:ms)
+  | m /= 0, Right (TkRsv "}", _) <- t
            = (rbrace:)    <$> layout tts ms
 
 -- L (t:ts) ms = t : (L ts ms)
@@ -260,7 +270,6 @@ resolvePosition = fst . resolve
 data Token = TkLit Literal
            | TkVar Variable
            | TkRsv String
-           | TkPnc Char
            deriving (Eq, Show)
 
 type LinkedPos  = [ElemPos]

@@ -13,6 +13,7 @@ test = do
   putStrLn "\nTest.Parser.Decl"
   runTestTT testTypeDecl
   runTestTT testGenDecl
+  runTestTT testFnDecl
 
 testTypeDecl = group "Type Decl" [simpleType, typeAlias, newtype', dataType]
   where
@@ -105,3 +106,48 @@ testGenDecl = group "Gen Decl" [fixity, typeSig]
                    , Var (VarId "foo") ()
                    , Var (ConId "Bar") ()
                    ]
+
+testFnDecl = group "Function Decl" [lam, let', case', func]
+  where
+    lam = group "Lambda Abstraction" [
+        ass "\\x      -> x + 1"      ==> lam1
+      , ass "\\(x:xs) -> x + sum xs" ==> lam2
+      , ass "\\x x    -> x"          ==> lam3
+      ] where ass = testParse pLExpr
+
+    patVar x = PVar (VarId x) ()
+    patX     = patVar "x"
+    patXs    = patVar "xs"
+    cons     = Op (ConSym ":") ()
+    plus     = Op (VarSym "+") ()
+    patXXs   = PInfix patX cons patXs ()
+    expVar x = EVar (VarId x) ()
+    varX     = expVar "x"
+    varXs    = expVar "xs"
+    varSum   = expVar "sum"
+    xPlus1   = EInfix varX plus (ELit (LInt 1) ()) ()
+    xPlusXs  = EInfix varX plus (EApp varSum [varXs] ()) ()
+
+    lam1 = ELam [patX] xPlus1 ()
+    lam2 = ELam [patXXs] xPlusXs ()
+    lam3 = ELam [patX, patX] varX ()
+
+    let' = group "Let Binding" [
+        ass "let x = x + 1; x = 1 in x + sum xs"
+          ==> let1
+      , ass "let x = x + 1; x = 1; in x + sum xs"
+          ==> let1
+      ] where ass = testParse pLExpr
+
+    varX' = Var (VarId "x") ()
+    let1 = ELet [xIsXPlus1, xIs1] xPlusXs ()
+
+    case' = group "Case Of" []
+
+    func = group "Function" [
+        ass "x = x + 1" ==> xIsXPlus1
+      , ass "x = 1"     ==> xIs1
+      ] where ass = testParse pDecl
+
+    xIsXPlus1 = DeclFn (FnArgs varX' [] ()) xPlus1 [] ()
+    xIs1      = DeclFn (FnArgs varX' [] ()) (ELit (LInt 1) ()) [] ()
