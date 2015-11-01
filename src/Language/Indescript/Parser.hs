@@ -218,31 +218,29 @@ pAExpr = scope $  pVar <|> pCon <|> pLit
 pTypeAlias, pNewType, pDataType :: ISParser s m => m (Decl ElemPos)
 pTypeAlias = scope $ liftA2 DeclTypeAlias pLhs pType
   where
-    pLhs = reserved "type" *> pSimpleType
+    pLhs = reserved "type" *> pSimpleType <* equal
 
 -- TODO: add support for the field-like syntax.
-pNewType = scope $ do tyName  <- reserved "newtype" *> pSimpleType
-                      _       <- equal
-                      conName <- scope $ fmap TCon conid
-                      wrapped <- pAType
-                      return $ DeclNewType tyName conName wrapped
+pNewType = scope $ liftA3 DeclNewType pLhs pTCon pAType
+  where
+    pLhs  = reserved "newtype" *> pSimpleType <* equal
+    pTCon = scope $ fmap TCon conid
 
 pDataType = scope $ liftA2 DeclDataType pLhs pRhs
   where
     pLhs = reserved "data" *> pSimpleType
     pRhs = equal *> (MP.sepBy1 pConstr $ reserved "|")
       where
-        pConstr = pLConstr <|> pInfix
-          where
-            pLConstr = pFXs pCon pArg TApp
-            pInfix = scope $ liftA3 TInfix pArg pConOp pArg
-            pCon = scope $ fmap TCon con
-            pArg = pFType <|> pAType
+        pConstr  = MP.try pInfix <|> pLConstr
+        pInfix   = scope $ liftA3 TInfix pFType pConOp pFType
+        pLConstr = pFXs pCon pAType TApp
+        pCon     = scope $ fmap TCon con
 
 pSimpleType :: ISParser s m => m (Type ElemPos)
 pSimpleType = pPrefix <|> pInfix
-  where pPrefix = pFXs (scope $ fmap TCon conid) pTyVar TApp
+  where pPrefix = pFXs pSTCon pTyVar TApp
         pInfix = scope $ liftA3 TInfix pTyVar pConOp pTyVar
+        pSTCon = scope $ fmap TCon (conid <|> MP.try (paren consym))
 
 --   ## Function Declaration
 pGenDecl :: ISParser s m => m (Decl ElemPos)
@@ -301,9 +299,10 @@ parse' parser srcName input = let
   in result
 
 testParse parser input = let
+  parser'        = parser <* MP.eof
   (Just tokens)  = lexIndescript input
-  stateMonad     = MP.runParserT parser "(test)" tokens
+  stateMonad     = MP.runParserT parser' "(test)" tokens
   in evalState stateMonad $ ElemPos pesudoPoint zeroSpan
 
 parse :: String -> String -> [Decl ElemPos]
-parse = parse' pModule
+parse = parse' (pModule <* MP.eof)
