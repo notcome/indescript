@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Language.Indescript.Parser.Lexer (
     Token(..)
@@ -188,50 +189,56 @@ insertIndents (tok:toks) = case indent (tok:toks) of
 --  ### Layout Algorithm
 -- A direct translation of the layout algorithm presented
 -- in the Haskell 2010 Language Report. Modified to handle “in”.
+
+-- Pattern Synonyms
+pattern Same n  = Left (SameLv n)
+pattern Next n  = Left (NextLv n)
+pattern TokP s <- Right (TkRsv s, _)
+
 layout :: [Either Indent (Token, ElemPos)] -> [Int] -> Maybe [(Token, ElemPos)]
 -- L (<n>:ts) (m:ms) = ; : (L ts (m:ms))   if m = n
 --                   = } : (L (<n>):ts ms) if n < m
 -- L (<n>:ts) ms     = L ts ms
-layout tts@((Left (SameLv n)):ts) (m:ms)
+layout tts@((Same n):ts) (m:ms)
   | m == n = (semicolon:) <$> layout ts  (m:ms)
   | n < m  = (rbrace:)    <$> layout tts ms
-layout ((Left (SameLv _)):ts) ms
-                            = layout ts  ms
+layout ((Same _):ts) ms    =  layout ts  ms
 
 -- L ({n}:ts) (m:ms) = { : (L ts (n:m:ms)) if n > m
 -- L ({n}:ts) []     = { : (L ts [n])      if n > 0
 -- L ({n}:ts) ms     = { : } : (L (<n>:ts) ms)
-layout ((Left (NextLv n)):ts) (m:ms)
+layout ((Next n):ts) (m:ms)
   | n > m  = (lbrace:)    <$> layout ts  (n:m:ms)
-layout ((Left (NextLv n)):ts) []
+layout ((Next n):ts) []
   | n > 0  = (lbrace:)    <$> layout ts  [n]
-layout ((Left (NextLv n)):ts) ms = do
-  rest <- layout (Left (SameLv n):ts) ms
+layout ((Next n):ts) ms = do
+  rest <- layout (Same n:ts) ms
   return $ lbrace:rbrace:rest
 
 -- Special rule for “in”:
 -- L (t:in:ts) (m:ms) = } : L (in:ts ms) if t ≠ { and m ≠ 0
-layout ((Right t):in_@(Right (TkRsv "in", _)):ts) (m:ms)
-  | notRBrace t, m /= 0 = prefix <$> layout (in_:ts) ms
-  where notRBrace (TkRsv "}", _) = False
-        notRBrace _              = True
-        prefix ts' = t:rbrace:ts'
+layout (t1:t2:ts) (m:ms)
+  | Right t1' <- t1, notRbrace t1
+  , TokP "in" <- t2
+  , m /= 0 = (\rest -> t1':rbrace:rest) <$> layout (t2:ts) ms
+  where notRbrace (TokP "}") = False
+        notRbrace _          = True
 
 -- L (}:ts) (0:ms) = } : (L ts ms)
 -- L (}:ts) ms     = parse-error
+layout ((TokP "}"):ts)   mms
+  | 0:ms <- mms = (rbrace:) <$> layout ts ms
+  | otherwise   = Nothing
+
 -- L ({:ts) ms     = { : (L ts (0:ms))
 -- L (t:ts) (m:ms) = } : (L (t:ts) ms) if m ≠ 0 and parse-error(t)
-layout ((Right    (TkRsv "}", _)):ts) (0:ms)
-           = (rbrace:)    <$> layout ts  ms
-layout ((Right    (TkRsv "}", _)):_)  _
-           = Nothing
-layout ((Right lb@(TkRsv "{", _)):ts) ms
-           = (lb:)        <$> layout ts  (0:ms)
 -- A parse-error only occurs when an explicit right brace matches a non-explicit
 -- left brace, as guarded below.
-layout tts@(t:_) (m:ms)
-  | m /= 0, Right (TkRsv "}", _) <- t
-           = (rbrace:)    <$> layout tts ms
+layout (t:ts) mms@(m:ms)
+  | TokP "{" <- t, Right lb <- t
+    = (lb:)     <$> layout ts     (0:mms)
+  | TokP "}" <- t, m /= 0
+    = (rbrace:) <$> layout (t:ts) ms
 
 -- L (t:ts) ms = t : (L ts ms)
 -- L []     [] = []
