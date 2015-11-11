@@ -99,24 +99,27 @@ testExpr = group "Expr" [simple, complex]
     list_foo    = EInfix foo opCons list ()
     neg_999     = ENeg num999 ()
 
+    paren ast = EParen ast ()
+
     cmpxExpr = [
-        ass "(999)"     ==> num999
-      , ass "(1 + 10)"  ==> _1_plus_10
+        ass "(999)"     ==> paren num999
+      , ass "(1 + 10)"  ==> paren _1_plus_10
       , ass sCmpxExpr1  ==> cmpxExpr1
       , ass sCmpxExpr2  ==> cmpxExpr2
-      , ass sCmpxExpr2' ==> cmpxExpr2
+      , ass sCmpxExpr2' ==> cmpxExpr2'
       ] where ass = testParse pExpr
 
     sCmpxExpr1 = "(1 + 10) + (-999) :+: (foo Bar)"
-    cmpxExpr1   = let rhs = EInfix neg_999 opCPlus foo_Bar ()
-                  in EInfix _1_plus_10 opPlus rhs ()
+    cmpxExpr1   = let rhs = EInfix (paren neg_999) opCPlus (paren foo_Bar) ()
+                  in EInfix (paren _1_plus_10) opPlus rhs ()
     sCmpxExpr2  = "if " ++ sCmpxExpr1 ++
                " then " ++ sIfThen1'  ++
                " else " ++ "-999"
+    cmpxExpr2   = EIf cmpxExpr1 ifThen1 neg_999 ()
     sCmpxExpr2' = "if " ++ sCmpxExpr1 ++
               " then (" ++ sIfThen1   ++
               ") else " ++ "-999"
-    cmpxExpr2   = EIf cmpxExpr1 ifThen1 neg_999 ()
+    cmpxExpr2'  = EIf cmpxExpr1 (paren ifThen1) neg_999 ()
 
 testPat = group "Pat" [simple, complex]
   where

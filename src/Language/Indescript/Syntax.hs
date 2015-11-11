@@ -41,6 +41,8 @@ data Expr a = ELam [Pat a]  (Expr a) a
             | EROpSec (Op a) (Expr a) a
             | EInfix  (Expr a) (Op a) (Expr a) a
             | ENeg    (Expr a) a
+-- Intermediate representation, removed after resolving infix expressions.
+            | EParen  (Expr a) a
             deriving (Eq, Show, Functor, Generic1)
 
 instance Annotation Expr where

@@ -209,7 +209,7 @@ pAExpr = scope $  pVar <|> pCon <|> pLit
     pVar = fmap EVar var
     pCon = fmap ECon con
     pLit = fmap ELit literal
-    pParened = paren pExpr >>= (return . flip updateAST)
+    pParened = fmap EParen $ paren pExpr
     pLOpSec = paren $ liftA2 (flip ELOpSec) pExpr pOp
     pROpSec = paren parser
       where parser = do op@(Op opv _) <- pOp
