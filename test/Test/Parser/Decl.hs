@@ -142,12 +142,32 @@ testFnDecl = group "Function Decl" [lam, let', case', func]
     varX' = Var (VarId "x") ()
     let1 = ELet [xIsXPlus1, xIs1] xPlusXs ()
 
-    case' = group "Case Of" []
+    case' = group "Case Of" [
+        ass "case list of [] -> 0; (x:xs) -> x + sum xs"
+          ==> case1
+      , ass "case list of\n\
+            \  []     -> 0\n\
+            \  (x:xs) -> x + sum xs"
+          ==> case1
+      ] where ass = testParse pLExpr
+
+    case1 = ECase list [alt1, alt2] ()
+      where
+        list = expVar "list"
+        alt1 = EAlt emptyList zero [] ()
+          where
+            emptyList = PCon (ConSym "[]") ()
+            zero      = ELit (LInt 0) ()
+        alt2 = EAlt patXXs xPlusXs [] ()
 
     func = group "Function" [
         ass "x = x + 1" ==> xIsXPlus1
       , ass "x = 1"     ==> xIs1
+      , ass "x = x + 1 where x = 1"
+                        ==> whereFn
       ] where ass = testParse pDecl
 
     xIsXPlus1 = DeclFn (FnArgs varX' [] ()) xPlus1 [] ()
     xIs1      = DeclFn (FnArgs varX' [] ()) (ELit (LInt 1) ()) [] ()
+
+    whereFn   = DeclFn (FnArgs varX' [] ()) xPlus1 [xIs1] ()
