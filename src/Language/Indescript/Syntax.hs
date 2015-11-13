@@ -3,110 +3,69 @@
 {-# LANGUAGE DeriveGeneric #-}
 module Language.Indescript.Syntax where
 
-import GHC.Generics    hiding (Fixity)
-import Data.Annotation
+newtype Fix w f = In { out :: w (f (Fix w f)) }
 
-data Literal = LInt    Int
-             | LFloat  Float
-             | LChar   Char
-             | LString String
-             | LUnit
-             deriving (Eq, Show)
+type Outer w f = f (Fix w f)
+type Inner w f = Fix w f
 
-data Variable = VarId  String
-              | ConId  String
-              | VarSym String
-              | ConSym String
-              deriving (Eq, Show)
+data Lit = LInt    Int
+         | LFloat  Float
+         | LChar   Char
+         | LString String
+         | LUnit
+         deriving (Eq, Show)
 
-data Op a = Op Variable a
-          deriving (Eq, Show, Functor, Generic1)
+data Var = VarId  String
+         | ConId  String
+         | VarSym String
+         | ConSym String
+         deriving (Eq, Show)
 
---   ## Expression
-data Alt a = EAlt (Pat a) (Expr a) [Decl a] a
-           deriving (Eq, Show, Functor, Generic1)
+type Expr w = Fix w (ExprF w)
+data ExprF w f = EVar Var
+               | ECon Var
+               | ELit Lit
+               | ENeg   f
+               | EParen f
+               | ELOpSec (w Var) f
+               | EROpSec (w Var) f
+               | EInfix  (w Var) f f
+               | EApp    f [f]
+               | EAnn  f (Type w)
+               | EIf   f f f
+               | ELam  [Pat w] f
+               | ELet  [Decl w] f
+               | ECase f [(Pat w, f, [Decl w])]
+               deriving (Functor)
 
-instance Annotation Alt where
-  annotation = genericAnnotation
+type Type w = Fix w (TypeF w)
+data TypeF w f = TVar Var
+               | TCon Var
+               | TInfix (w Var) f f
+               | TApp   f [f]
+               | TScheme [w Var] f
+               deriving (Functor)
 
-data Expr a = ELam [Pat a]  (Expr a) a
-            | ELet [Decl a] (Expr a) a
-            | EIf  (Expr a) (Expr a) (Expr a) a
-            | ECase (Expr a) [Alt a] a
-            | EApp (Expr a) [Expr a] a
-            | EVar Variable a
-            | ECon Variable a
-            | ELit Literal  a
-            | ELOpSec (Op a) (Expr a) a
-            | EROpSec (Op a) (Expr a) a
-            | EInfix  (Expr a) (Op a) (Expr a) a
-            | ENeg    (Expr a) a
--- Intermediate representation, removed after resolving infix expressions.
-            | EParen  (Expr a) a
-            deriving (Eq, Show, Functor, Generic1)
+type Pat w = Fix w (PatF w)
+data PatF w f = PVar Var
+              | PLit Lit
+              | PAs  (w Var) f
+              | PWildcard
+              | PInfix  (w Var) f f
+              | PConApp (w Var) [f]
+              deriving (Functor)
 
-instance Annotation Expr where
-  annotation = genericAnnotation
+type Decl w = Fix w (DeclF w)
+data DeclF w f = DeclEqt  (w (FnLhs w)) (Expr w) [f]
+               | DeclEqts [f]
+               | DeclFixity    AssocType Int [w Var]
+               | DeclTypeSig   [w Var] (Type w)
+               | DeclTypeAlias (Type w) (Type w)
+               | DeclNewType   (Type w)
+               | DeclDataType  (Type w) [Type w]
+               deriving (Functor)
 
---   ## Pattern
-data Pat a = PVar Variable a
-           | PAs  (Pat a) (Pat a) a
-           | PLit Literal  a
-           | PCon Variable a
-           | PWildcard a
-           | PApp   (Pat a) [Pat a] a
-           | PInfix (Pat a) (Op a) (Pat a) a
-           deriving (Eq, Show, Functor, Generic1)
+data FnLhs w = FnArgs (w Var) (Pat w)
+             | FnOp   (w Var) (Pat w) (Pat w)
 
-instance Annotation Pat where
-  annotation = genericAnnotation
-
---   ## Type
-data Type a = TVar Variable a
-            | TCon Variable a
-            | TApp    (Type a) [Type a] a
-            | TInfix  (Type a) (Op a) (Type a) a
-            | TForall [Type a] (Type a) a
-            deriving (Eq, Show, Functor, Generic1)
-
-instance Annotation Type where
-  annotation = genericAnnotation
-
---   ## Declaration
 data AssocType = Infix | InfixL | InfixR deriving (Eq, Show)
-data Fixity a  = Fixity   AssocType     [Op a] a
-               | FixityLv AssocType Int [Op a] a
-               deriving (Eq, Show, Functor, Generic1)
-
-instance Annotation Fixity where
-  annotation = genericAnnotation
-
-data Var a = Var Variable a
-           deriving (Eq, Show, Functor, Generic1)
-
-instance Annotation Var where
-  annotation = genericAnnotation
-
-data FnLhs a = FnArgs (Var a) [Pat a] a
-             | FnOp   (Pat a) (Op a) (Pat a) a
-             deriving (Eq, Show, Functor, Generic1)
-
-instance Annotation FnLhs where
-  annotation = genericAnnotation
-
-data Decl a = DeclFn (FnLhs a) (Expr a) [Decl a] a
-            | DeclTypeSig [Var a] (Type a) a
-            | DeclFixity  (Fixity a) a
-            | DeclTypeAlias (Type a) (Type a) a
-            | DeclNewType   (Type a) (Type a) (Type a) a
-            | DeclDataType  (Type a) [Type a] a
-            deriving (Eq, Show, Functor, Generic1)
-
-instance Annotation Decl where
-  annotation = genericAnnotation
-
-updateAST :: Functor f => b -> f a -> f b
-updateAST x' = fmap $ const x'
-
-purifyAST :: Functor f => f a -> f ()
-purifyAST = updateAST ()

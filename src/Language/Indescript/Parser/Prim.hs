@@ -4,11 +4,10 @@
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+
 module Language.Indescript.Parser.Prim where
 
 import Control.Monad.State (get, put, MonadState(..))
-
-import Data.Annotation
 
 import qualified Text.Megaparsec           as MP
 import qualified Text.Megaparsec.Pos       as MPos
@@ -34,15 +33,20 @@ nextToken f = do (t, ps) <- MP.token updateTokenPos f
           | []    <- ps = mp
         updateTokenPos _ _ _ = impossible
 
-scope' :: ISParser s m => m a -> m (a, ElemPos)
-scope' p = do start <- MP.lookAhead $ satisfy (const True) >>= return . snd
-              x     <- p
-              end   <- get
-              return (x, elemPos (start, end))
+-- TODO: figure out why I have to use two definitions.
+scope' :: ISParser s m => m a -> m (AnnotPos a)
+scope' p = do sPos <- nextElem >>= return . snd
+              res  <- p
+              ePos <- get
+              return (elemPos (sPos, ePos), res)
+  where nextElem = MP.lookAhead $ satisfy (const True)
 
-scope :: ISParser s m => m (ElemPos -> a) -> m a
-scope p = do (x, p) <- scope' p
-             return $ x p
+scope :: ISParser s m => m (Outer AnnotPos f) -> m (Inner AnnotPos f)
+scope  p = do sPos <- nextElem >>= return . snd
+              res  <- p
+              ePos <- get
+              return $ In (elemPos (sPos, ePos), res)
+  where nextElem = MP.lookAhead $ satisfy (const True)
 
 satisfy' :: ISParser s m => (PosedToken -> Bool) -> m PosedToken
 satisfy' test = nextToken (\pt@(t, _) ->
@@ -57,20 +61,21 @@ token t = satisfy (== t)
 
 reserved = token . TkRsv
 
+type AnnotPos = (,) ElemPos
+
+type PosedExpr = Expr AnnotPos
+type PosedType = Type AnnotPos
+type PosedPat  = Pat  AnnotPos
+type PosedDecl = Decl AnnotPos
+
 class GetElemPos a where
   elemPos :: a -> ElemPos
 
 instance GetElemPos ElemPos where
   elemPos = id
 
-instance GetElemPos a => GetElemPos (Expr a) where
-  elemPos = annotation . fmap elemPos
-
-instance GetElemPos a => GetElemPos (Pat a)  where
-  elemPos = annotation . fmap elemPos
-
-instance GetElemPos a => GetElemPos (Type a) where
-  elemPos = annotation . fmap elemPos
+instance GetElemPos (Fix AnnotPos f) where
+  elemPos = fst . out
 
 instance (GetElemPos a, GetElemPos b) => GetElemPos (a, b) where
   elemPos (l, r) = let
@@ -82,7 +87,8 @@ instance (GetElemPos a, GetElemPos b) => GetElemPos (a, b) where
 
 instance GetElemPos a => GetElemPos [a] where
   elemPos = foldl1 combine . map elemPos
-    where combine l r = elemPos (l, r)
+    where
+      combine l r = elemPos (l, r)
 
 instance ShowToken Token where
   showToken = show

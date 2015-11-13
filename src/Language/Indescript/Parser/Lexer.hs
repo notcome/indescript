@@ -60,13 +60,13 @@ pOct = some cOctit
 pDec = some cDigit
 pHex = some cHexit
 
-pInteger :: RE Char (Literal, Int)
+pInteger :: RE Char (Lit, Int)
 pInteger =  (string "0b" <|> string "0B") *> fmap (from 2)  pBin
         <|> (string "0o" <|> string "0o") *> fmap (from 8)  pOct
         <|> (string "0x" <|> string "0x") *> fmap (from 16) pHex
         <|> fmap (from 10) pDec
   where
-    from :: Int -> String -> (Literal, Int)
+    from :: Int -> String -> (Lit, Int)
     from base s = (LInt $ fold base s, length s)
 
     fold :: Int -> String -> Int
@@ -81,7 +81,7 @@ pInteger =  (string "0b" <|> string "0B") *> fmap (from 2)  pBin
        <|> (+10) <$> try 'a' 6
       in case x of Just x' -> x'; Nothing -> impossible
 
-pFloat :: RE Char (Literal, Int)
+pFloat :: RE Char (Lit, Int)
 pFloat = let str = pDec <++> string "." <++> pDec
          in fmap ((,) <$> LFloat . read <*> length) str
 
@@ -274,8 +274,8 @@ resolvePosition = fst . resolve
 
 --    # Interface
 --   ## Interface Datatypes
-data Token = TkLit Literal
-           | TkVar Variable
+data Token = TkLit Lit
+           | TkVar Var
            | TkRsv String
            deriving (Eq, Show)
 
