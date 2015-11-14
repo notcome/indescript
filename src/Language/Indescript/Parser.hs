@@ -45,11 +45,7 @@ paren p = lparen *> p <* rparen
 brace p = lbrace *> p <* rbrace
 
 -- { p1; p2; ... }
--- TODO: wait until the next release of megaparsec.
 braceBlock p = brace $ sepEndBy p semicolon
-  where
-    sepEndBy p sep = sepEndBy1 p sep <|> pure []
-    sepEndBy1 p sep = (:) <$> p <*> ((sep *> sepEndBy p sep) <|> pure [])
 
 --   ## Simple Combinators
 --  ### Extractors
@@ -73,6 +69,10 @@ consym = satisfy test >>= extractTkVar
 extractTkVar ((TkVar x), _) = return x
 extractTkVar _              = impossible
 
+conCons, conArrow :: ISParser s m => m Var
+conCons = reserved ":" *> return (ConSym ":")
+conArrow = sarrow *> return (ConSym "->")
+
 literal :: ISParser s m => m Lit
 literal = satisfy test >>= extract
   where test (TkLit _) = True
@@ -82,34 +82,29 @@ literal = satisfy test >>= extract
 
 --  ### Combinators
 -- #### Concrete Combinators
-litCon, cons, var, con :: ISParser s m => m Var
-litCon =  MP.try (paren pTupleCon)
-      <|> MP.try (paren $ return (ConSym "()"))
-      <|> lsquar *> rsquar *> return (ConSym "[]")
+pLitCon, pVar, pCon :: ISParser s m => m Var
+pLitCon =  MP.try (paren pTupleCon)
+       <|> MP.try (paren $ return (ConSym "()"))
+       <|> lsquar *> rsquar *> return (ConSym "[]")
   where
     pTupleCon = MP.some comma >>= (return . mkTuple . length)
--- TODO: move mkTuple to a more general position.
     mkTuple n = ConSym $ "(" ++ replicate n ',' ++ ")"
 
-cons = reserved ":" *> return (ConSym ":")
-var  = varid <|> MP.try (paren varsym)
-con  = conid <|> MP.try (paren (consym <|> cons)) <|> litCon
+pVar = varid <|> MP.try (paren varsym)
+pCon = conid <|> MP.try (paren consym') <|> pLitCon
+  where
+    consym' = consym <|> conCons
 
-pOp, pConOp, pTyConOp :: ISParser s m => m (AnnotPos Var)
-pOp = scope' $ (oid <|> sym) >>= return
-  where oid = backtick *> (varid <|> conid) <* backtick
-        sym = varsym <|> consym
+pEOp, pPOp, pTOp :: ISParser s m => m (AnnotPos Var)
+pEOp = scope' (opid <|> opsym)
+  where opid  = backtick *> (varid <|> conid) <* backtick
+        opsym = varsym <|> consym
 
-pConOp = scope' $ (oid <|> sym <|> cons) >>= return
-  where oid = backtick *> conid <* backtick
-        sym = varsym <|> consym
+pPOp = scope' (opConId <|> opConSym)
+  where opConId  = backtick *> conid <* backtick
+        opConSym = consym <|> conCons
 
-pTyConOp = pConOp <|> arrowOp
-  where arrowOp = scope' $ do
-          _ <- token (TkRsv "->")
-          return $ ConSym "->"
-
--- sarrow *> return $ ConSym "->"
+pTOp = pPOp <|> scope' conArrow
 
 pWhere :: ISParser s m => m [PosedDecl]
 pWhere = toList <$> optional (reserved "where" *> braceBlock pDecl)
@@ -118,35 +113,36 @@ pWhere = toList <$> optional (reserved "where" *> braceBlock pDecl)
     toList (Just xs) = xs
 
 -- #### Abstract Combinators
-pFXs :: (ISParser s m
-        , a ElemPos ~ pa, b ElemPos ~ pb
-        , GetElemPos pa, GetElemPos pb)
-     => m pa -> m pb -> (pa -> [pb] -> ElemPos -> pa) -> m pa
-pFXs pf px comb = liftA2 comb' pf (MP.many px)
-  where comb' f [] = f
-        comb' f xs = comb f xs $ elemPos (f, xs)
+pFXs' pf px fxs = scope $ do
+  f <- pf; xs <- MP.many px
+  if null xs then return $ snd $ out f
+             else return $ fxs f xs
 
+pFXs pa fxs = pFXs' pa pa fxs
+
+-- TODO: wait until the next release of megaparsec.
+sepEndBy p sep = sepEndBy1 p sep <|> pure []
+sepEndBy1 p sep = (:) <$> p <*> ((sep *> sepEndBy p sep) <|> pure [])
 --    # Non-trivial Combinators
 --   ## Type
 pType, pFType, pAType :: ISParser s m => m PosedType
 pType = pScheme <|> pInfix
   where
-    pScheme = scope $ do _   <- reserved "forall"
-                         env <- MP.many (scope' varid) <* dotsign
-                         ty  <- pInfix
-                         return $ TScheme env ty
+    pScheme = let
+      env = reserved "forall" *> MP.many (scope' varid) <* dotsign
+      ty  = pInfix
+      in scope $ liftA2 TScheme env ty
 
     pInfix = MP.try pOpType <|> pFType
-      where pOpType = scope $ liftA3 TInfix pTyConOp pFType pType
+      where pOpType = scope $ liftA3 TInfix pFType pTOp pType
 
-pFType = pFXs pAType pAType TApp
+pFType = pFXs pAType TApp
 
-pAType = pCon <|> pTyVar <|> pParened
+pAType = scope $ pTCon <|> pTVar <|> pParened
   where
-    pCon = scope $ fmap TCon con'
-      where con'    = con <|> MP.try pSArrow
-            pSArrow = paren sarrow *> return (ConSym "->")
-    pParened = scope $ paren pType
+    pTCon = fmap TCon (pCon <|> fmap snd (MP.try (paren pTOp)))
+    pTVar = fmap TVar varid
+    pParened = fmap TParen (paren pType)
 
 pTyVar :: ISParser s m => m PosedType
 pTyVar = scope $ fmap TVar varid
@@ -155,7 +151,7 @@ pTyVar = scope $ fmap TVar varid
 pPat, pLPat, pFPat, pAPat :: ISParser s m => m PosedPat
 pPat = MP.try pOpCon <|> pLPat
   where
-    pOpCon = scope $ liftA3 PInfix pLPat pConOp pPat
+    pOpCon = scope $ liftA3 PInfix pLPat pPOp pPat
 
 pLPat = pFPat <|> pAPat <|> pNeg
   where
@@ -164,32 +160,31 @@ pLPat = pFPat <|> pAPat <|> pNeg
                       case lit of
                         LInt   n -> return $ PLit $ LInt   (-n)
                         LFloat n -> return $ PLit $ LFloat (-n)
-                        _        -> fail "expected a number."
+                        _        -> fail "expect a number."
 
-pFPat = scope $ liftA2 PConApp con (MP.many pAPat)
+pFPat = scope $ liftA2 PConApp pPOp (MP.many pAPat)
 
 -- TODO: add support for tuple, list, labeled pattern, and irrefutable pattern
-pAPat = MP.try pAs' <|> pAs <|> pCon <|> pLit <|> pWildcard <|> pParened
+pAPat = scope (MP.try pPVar <|> pAs <|> pPLit <|> pP_ <|> pParened)
   where
-    pAs  = scope $ fmap PVar var
-    pAs' = scope $ liftA2 PAs pAs (reserved "@" *> pAPat)
-    pCon = scope $ liftA2 PConApp con $ pure []
-    pLit = scope $ fmap PLit literal
-    pWildcard = scope $ reserved "_" *> return PWildcard
-    pParened  = scope $ paren pPat
+    pPVar = fmap PVar varid
+    pAs   = liftA2 PAs (scope' varid <* reserved "*") pAPat
+    pPLit = fmap PLit literal
+    pP_   = reserved "_" *> return PWildcard
+    pParened = fmap PParen (paren pPat)
 
 --   ## Expression
 pExpr, pLExpr, pFExpr, pAExpr :: ISParser s m => m PosedExpr
 -- TODO: add support for type ascription, exp :: type
 pExpr = MP.try pOpExpr <|> pNeg <|> pLExpr
   where
-    pOpExpr = scope $ liftA3 EInfix pLExpr (pOp <|> pConOp) pExpr
+    pOpExpr = scope $ liftA3 EInfix pLExpr pEOp pExpr
     pNeg = scope $ fmap ENeg (negsign *> pExpr)
 
 -- TODO: add support for do-notation [after typeclass]
 pLExpr = pLExpr' <|> pFExpr
   where
-    pLExpr' = scope $ pLam <|> pLet <|> pIf <|> pCase {-<|> pDo-}
+    pLExpr' = scope $ pLam <|> pLet <|> pIf <|> pCase
 
     pLam = liftA2 ELam (reserved "\\"   *> MP.some pAPat)
                        (sarrow          *> pExpr)
@@ -201,31 +196,30 @@ pLExpr = pLExpr' <|> pFExpr
                        (reserved "else" *> pExpr)
     pCase = liftA2 ECase (reserved "case" *> pExpr)
                          (reserved "of"   *> braceBlock pAlt)
-      where pAlt = scope $ liftA3 (,,) pPat (sarrow *> pExpr) pWhere
+      where pAlt = liftA3 (,,) pPat (sarrow *> pExpr) pWhere
 
-pFExpr = pFXs pAExpr pAExpr EApp
+pFExpr = pFXs pAExpr EApp
 
 -- TODO: add support for tuple, list, labeled construction and update, and
 --       consider whether to add arithmetic seqeunce and list comprehension
-pAExpr = scope $  pVar <|> pCon <|> pLit
+pAExpr = scope $  pEVar    <|> pECon   <|> pELit
               <|> pParened <|> pLOpSec <|> pROpSec
   where
-    pVar = fmap EVar var
-    pCon = fmap ECon con
-    pLit = fmap ELit literal
+    pEVar = fmap EVar pVar
+    pECon = fmap ECon pCon
+    pELit = fmap ELit literal
     pParened = fmap EParen $ paren pExpr
-    pLOpSec = paren $ liftA2 (flip ELOpSec) pExpr pOp
+    pLOpSec = paren $ liftA2 (flip ELOpSec) pExpr pEOp
     pROpSec = paren pROpSec'
-      where pROpSec' = do op <- pOp
+      where pROpSec' = do op <- pEOp
                           x  <- pExpr
                           case op of
-                            VarSym "-" -> return $ ENeg x
-                            _          -> return $ EROpSec op x
+                            (_, VarSym "-") -> return $ ENeg x
+                            _               -> return $ EROpSec op x
 
 --    # Declaration
 --   ## Type, Newtype, Data
 -- TODO: add support for type class.
-
 pTypeAlias, pNewType, pDataType :: ISParser s m => m PosedDecl
 pTypeAlias = scope $ liftA2 DeclTypeAlias pLhs pType
   where
@@ -240,18 +234,18 @@ pNewType = scope $ liftA3 DeclNewType pLhs pTCon pAType
 pDataType = scope $ liftA2 DeclDataType pLhs pRhs
   where
     pLhs = reserved "data" *> pSimpleType
-    pRhs = equal *> (MP.sepBy1 pConstr $ reserved "|")
+    pRhs = equal *> (MP.sepBy1 pConDef $ reserved "|")
       where
-        pConstr  = MP.try pInfix <|> pLConstr
-        pInfix   = scope $ liftA3 TInfix pFType pConOp pFType
-        pLConstr = pFXs pCon pAType TApp
-        pCon     = scope $ fmap TCon con
+        pConDef = MP.try pInfix <|> pPrefix
+        pInfix  = scope $ liftA3 TInfix pFType pTOp pFType
+        pPrefix = pFXs' pTCon pAType TApp
+        pTCon   = scope $ fmap TCon pCon
 
 pSimpleType :: ISParser s m => m PosedType
 pSimpleType = pPrefix <|> pInfix
-  where pPrefix = pFXs pSTCon pTyVar TApp
-        pInfix = scope $ liftA3 TInfix pTyVar pConOp pTyVar
-        pSTCon = scope $ fmap TCon (conid <|> MP.try (paren consym))
+  where pPrefix = pFXs' pSTCon pTyVar TApp
+        pInfix = scope $ liftA3 TInfix pTyVar pTOp pTyVar
+        pSTCon = scope $ fmap TCon pCon
 
 --   ## Function Declaration
 pGenDecl :: ISParser s m => m PosedDecl
@@ -259,10 +253,11 @@ pGenDecl = scope $ pTypeSig <|> pFixity
   where
 -- TODO: add support for type signature with context.
     pTypeSig = liftA2 DeclTypeSig pVars (reserved "::" *> pType)
-      where pVars = MP.sepBy1 (var <|> con) comma
-    pFixity  = scope $ liftA3 DeclFixity pAssocType pFixityLv pOps
+      where pVars = MP.sepBy1 (scope' pVar) comma
+    pFixity  = liftA3 DeclFixity pAssocType pFixityLv pOps
       where
-        pFixityLv = MP.optional pInt >>= (\case Nothing -> 9; Just l -> l)
+        pFixityLv = MP.optional pInt >>=
+                    return . (\case Nothing -> 9; Just l -> l)
         pAssocType =  reserved "infixl" *> return InfixL
                   <|> reserved "infixr" *> return InfixR
                   <|> reserved "infix"  *> return Infix
@@ -274,21 +269,21 @@ pGenDecl = scope $ pTypeSig <|> pFixity
                 extract (TkLit (LInt x), _) = return x
                 extract _                   = impossible
 
-        pOps = MP.sepBy1 pOp comma
+        pOps = MP.sepBy1 (pEOp <|> pPOp) comma
 
 pDecl :: ISParser s m => m PosedDecl
 pDecl =  MP.try pGenDecl <|> pDecl'
   where
     pDecl' = scope $ liftA3 DeclEqt pLhs (equal *> pRhs) pWhere
-    pLhs = MP.try pOpLhs <|> pLLhs
+    pLhs = scope' $ MP.try pOpLhs <|> pLLhs
       where
-        pOpLhs = scope $ liftA3 FnOp pPat pOp pPat
+        pOpLhs = liftA3 FnOp pPat pEOp pPat
         pLLhs  = p1 <|> p2
           where
-            p1 = scope $ liftA2 FnArgs var (MP.many pAPat)
-            p2 = scope $ do (FnArgs f xs _) <- paren p1
-                            rest            <- MP.some pAPat
-                            return $ FnArgs f (xs ++ rest)
+            p1 = liftA2 FnArgs (scope' pVar) (MP.many pAPat)
+            p2 = do (FnArgs f xs) <- paren p1
+                    rest          <- MP.some pAPat
+                    return $ FnArgs f (xs ++ rest)
 
 -- TODO: add support for guard expression.
     pRhs = pExpr
@@ -296,7 +291,7 @@ pDecl =  MP.try pGenDecl <|> pDecl'
 pTopDecl :: ISParser s m => m PosedDecl
 pTopDecl = pTypeAlias <|> pNewType <|> pDataType <|> pDecl
 --   ## Module
-pModule :: ISParser s m => m PosedDecl
+pModule :: ISParser s m => m [PosedDecl]
 pModule = reserved "module" *> reserved "where" *> braceBlock pTopDecl
 
 --    # Interface

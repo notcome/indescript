@@ -33,7 +33,7 @@ nextToken f = do (t, ps) <- MP.token updateTokenPos f
           | []    <- ps = mp
         updateTokenPos _ _ _ = impossible
 
--- TODO: figure out why I have to use two definitions.
+-- TODO: figure out a way to force GHC accept the truth.
 scope' :: ISParser s m => m a -> m (AnnotPos a)
 scope' p = do sPos <- nextElem >>= return . snd
               res  <- p
@@ -42,10 +42,10 @@ scope' p = do sPos <- nextElem >>= return . snd
   where nextElem = MP.lookAhead $ satisfy (const True)
 
 scope :: ISParser s m => m (Outer AnnotPos f) -> m (Inner AnnotPos f)
-scope  p = do sPos <- nextElem >>= return . snd
-              res  <- p
-              ePos <- get
-              return $ In (elemPos (sPos, ePos), res)
+scope p = do sPos <- nextElem >>= return . snd
+             res  <- p
+             ePos <- get
+             return $ In (elemPos (sPos, ePos), res)
   where nextElem = MP.lookAhead $ satisfy (const True)
 
 satisfy' :: ISParser s m => (PosedToken -> Bool) -> m PosedToken
@@ -59,6 +59,7 @@ satisfy test = satisfy' test' where test' (t, _) = test t
 token :: ISParser s m => Token -> m PosedToken
 token t = satisfy (== t)
 
+reserved :: ISParser s m => String -> m PosedToken
 reserved = token . TkRsv
 
 type AnnotPos = (,) ElemPos

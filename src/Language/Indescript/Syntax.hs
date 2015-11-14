@@ -29,7 +29,7 @@ data ExprF w f = EVar Var
                | EParen f
                | ELOpSec (w Var) f
                | EROpSec (w Var) f
-               | EInfix  (w Var) f f
+               | EInfix  f (w Var) f
                | EApp    f [f]
                | EAnn  f (Type w)
                | EIf   f f f
@@ -41,7 +41,8 @@ data ExprF w f = EVar Var
 type Type w = Fix w (TypeF w)
 data TypeF w f = TVar Var
                | TCon Var
-               | TInfix (w Var) f f
+               | TParen f
+               | TInfix f (w Var) f
                | TApp   f [f]
                | TScheme [w Var] f
                deriving (Functor)
@@ -49,9 +50,10 @@ data TypeF w f = TVar Var
 type Pat w = Fix w (PatF w)
 data PatF w f = PVar Var
               | PLit Lit
+              | PParen f
               | PAs  (w Var) f
               | PWildcard
-              | PInfix  (w Var) f f
+              | PInfix  f (w Var) f
               | PConApp (w Var) [f]
               deriving (Functor)
 
@@ -61,11 +63,11 @@ data DeclF w f = DeclEqt  (w (FnLhs w)) (Expr w) [f]
                | DeclFixity    AssocType Int [w Var]
                | DeclTypeSig   [w Var] (Type w)
                | DeclTypeAlias (Type w) (Type w)
-               | DeclNewType   (Type w)
+               | DeclNewType   (Type w) (Type w) (Type w)
                | DeclDataType  (Type w) [Type w]
                deriving (Functor)
 
-data FnLhs w = FnArgs (w Var) (Pat w)
-             | FnOp   (w Var) (Pat w) (Pat w)
+data FnLhs w = FnArgs (w Var) [Pat w]
+             | FnOp   (Pat w) (w Var) (Pat w)
 
 data AssocType = Infix | InfixL | InfixR deriving (Eq, Show)
