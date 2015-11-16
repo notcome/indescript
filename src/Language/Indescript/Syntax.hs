@@ -1,12 +1,50 @@
-{-# LANGUAGE DataKinds     #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE GADTs          #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE DataKinds      #-}
+
 module Language.Indescript.Syntax where
 
-newtype Fix w f = In { out :: w (f (Fix w f)) }
+newtype IxFix f i = In { out :: f (IxFix f) i }
 
-type Outer w f = f (Fix w f)
-type Inner w f = Fix w f
+data AstIx = AstDecl | AstExpr | AstPatt | AstType
+
+type AstDecl = 'AstDecl
+type AstExpr = 'AstExpr
+type AstPatt = 'AstPatt
+type AstType = 'AstType
+
+data AstIxProxy (i :: AstIx) where
+  DeclProxy :: AstIxProxy AstDecl
+  ExprProxy :: AstIxProxy AstExpr
+  PattProxy :: AstIxProxy AstPatt
+  TypeProxy :: AstIxProxy AstType
+
+type AnnotAstF a f i = (a, AstF f i)
+
+data AstF (f :: AstIx -> *) (i :: AstIx) where
+  VarF   :: Var -> AstIxProxy i -> AstF f i
+  LitF   :: Lit -> AstF f AstExpr
+  ParenF :: f i -> AstF f i
+  AppF   :: f i -> [f i] -> AstF f i
+  InfixF :: f i -> f i -> f i -> AstF f i
+  NegF   :: f AstExpr -> AstF f AstExpr
+  LOSecF :: f AstExpr -> f AstExpr -> AstF f AstExpr
+  ROSecF :: f AstExpr -> f AstExpr -> AstF f AstExpr
+  TyAnnF :: f AstExpr -> f AstType -> AstF f AstExpr
+  IfF    :: f AstExpr -> f AstExpr -> f AstExpr -> AstF f AstExpr
+  LamF   :: [f AstPatt] -> f AstExpr -> AstF f AstExpr
+  LetF   :: [f AstDecl] -> f AstExpr -> AstF f AstExpr
+  CaseF  :: f AstExpr -> [Altn f] -> AstF f AstExpr
+  TyGenF :: [f AstType] -> f AstType -> AstF f AstType
+  BindF  :: [f AstPatt] -> f AstPatt -> AstF f AstPatt
+  HoleF  :: AstF f AstPatt
+  EqtF   :: FnLhs f -> f AstExpr -> [f AstDecl] -> AstF f AstDecl
+  EqtsF  :: [f AstDecl] -> AstF f AstDecl
+  OpFixF :: AssocType -> Int -> [f AstExpr] -> AstF f AstDecl
+  TySigF :: [f AstExpr] -> f AstType -> AstF f AstDecl
+  TyAlsF :: f AstType -> f AstType -> AstF f AstDecl
+  NewTyF :: f AstType -> f AstType -> f AstType -> AstF f AstDecl
+  DatTyF :: f AstType -> [f AstType] -> AstF f AstDecl
 
 data Lit = LInt    Int
          | LFloat  Float
@@ -21,53 +59,9 @@ data Var = VarId  String
          | ConSym String
          deriving (Eq, Show)
 
-type Expr w = Fix w (ExprF w)
-data ExprF w f = EVar Var
-               | ECon Var
-               | ELit Lit
-               | ENeg   f
-               | EParen f
-               | ELOpSec (w Var) f
-               | EROpSec (w Var) f
-               | EInfix  f (w Var) f
-               | EApp    f [f]
-               | EAnn  f (Type w)
-               | EIf   f f f
-               | ELam  [Pat w] f
-               | ELet  [Decl w] f
-               | ECase f [(Pat w, f, [Decl w])]
-               deriving (Functor)
+type Altn  (f :: AstIx -> *) = (f AstPatt, f AstExpr, [f AstDecl])
 
-type Type w = Fix w (TypeF w)
-data TypeF w f = TVar Var
-               | TCon Var
-               | TParen f
-               | TInfix f (w Var) f
-               | TApp   f [f]
-               | TScheme [w Var] f
-               deriving (Functor)
-
-type Pat w = Fix w (PatF w)
-data PatF w f = PVar Var
-              | PLit Lit
-              | PParen f
-              | PAs  (w Var) f
-              | PWildcard
-              | PInfix  f (w Var) f
-              | PConApp (w Var) [f]
-              deriving (Functor)
-
-type Decl w = Fix w (DeclF w)
-data DeclF w f = DeclEqt  (w (FnLhs w)) (Expr w) [f]
-               | DeclEqts [f]
-               | DeclFixity    AssocType Int [w Var]
-               | DeclTypeSig   [w Var] (Type w)
-               | DeclTypeAlias (Type w) (Type w)
-               | DeclNewType   (Type w) (Type w) (Type w)
-               | DeclDataType  (Type w) [Type w]
-               deriving (Functor)
-
-data FnLhs w = FnArgs (w Var) [Pat w]
-             | FnOp   (Pat w) (w Var) (Pat w)
+data FnLhs (f :: AstIx -> *) = FnArgs [f AstExpr] (f AstPatt)
+                                | FnOp   (f AstPatt) (f AstExpr) (f AstPatt)
 
 data AssocType = Infix | InfixL | InfixR deriving (Eq, Show)
