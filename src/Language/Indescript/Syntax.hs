@@ -1,3 +1,12 @@
+-- Thanks /u/AndrasKovacs for pointing out the index type families solution
+-- https://www.reddit.com/r/haskell/comments/3sm1j1/how_to_mix_the_base_functorrecursion_scheme_stuff/cwyr61h
+-- and his standalone example:
+-- https://gist.github.com/AndrasKovacs/af856be6cf816e08da95
+
+-- The code will be refactored soon.
+
+[/u/AndrasKovacs](
+
 {-# LANGUAGE GADTs             #-}
 {-# LANGUAGE KindSignatures    #-}
 {-# LANGUAGE DataKinds         #-}
