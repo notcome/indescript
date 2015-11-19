@@ -60,3 +60,12 @@ cataM :: (Monad m, IxTraversable t)
       => (forall i. t a i -> m (a i))
       -> (forall i. IxFix t i -> m (a i))
 cataM phi = phi <=< itraverse (cataM phi) . out
+
+--   ## Anamorphisms
+ana :: IxFunctor f => (a ~> f a) -> (a ~> IxFix f)
+ana psi = In . imap (ana psi) . psi
+
+anaM :: (Monad m, IxTraversable t)
+     => (forall i. a i -> m (t a i))
+     -> (forall i. a i -> m (IxFix t i))
+anaM psi = fmap In . (itraverse (anaM psi) <=< psi)
