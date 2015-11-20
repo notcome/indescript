@@ -63,14 +63,26 @@ adjustAst ast = evalStateT (anaM psi $ ast) M.empty where
         Nothing       -> return $ M.insert op v env
     in foldrM build M.empty fixities
 
-  adjust x = return x
+  adjust :: forall i'. t a i' -> m (t a i')
+  adjust x = do
+    env <- get
+    case resolveAssoc (findWithDefault env 9 $ snd . snd)
+                      (findWithDefault env Infix $ fst . snd)
+                      x of
+      Left errMsg -> throwError errMsg
+      Right x'    -> return x'
+    where
+      findWithDefault env def f = \k ->
+        case M.lookup k env of
+          Just i  -> f i
+          Nothing -> def
 
 --  ### resolveAssoc
 -- A direct translation from the one specified in Haskell Language Report 2010.
 -- It’s put at top-level for test.
-resolveAssoc :: forall ast dop.
-             ( ast ~ AnnotAstF ElemPos (IxFix (AnnotAstF ElemPos)) AstExpr
-             , dop ~ (Var, Var -> IxFix (AnnotAstF ElemPos) AstExpr))
+resolveAssoc :: forall ast dop i.
+             ( ast ~ AnnotAstF ElemPos (IxFix (AnnotAstF ElemPos)) i
+             , dop ~ (Var, Var -> IxFix (AnnotAstF ElemPos) i))
              => (Var -> Int) -> (Var -> AssocType)
              -> ast -> Either String ast
 resolveAssoc lv assoc ast = case getFullExpr ast of
