@@ -9,13 +9,16 @@
 {-# LANGUAGE ConstraintKinds     #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE GADTs               #-}
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Language.Indescript.Parser.Poster where
 
+import Control.Arrow
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Foldable
+import Data.List
 
 import qualified Data.Map as M
 
@@ -25,6 +28,38 @@ import Language.Indescript.AST
 
 type ISParserEnv m = MonadError String m
 
+--   ## Group Equations
+groupEquations :: forall a t st i.
+               ( t ~ AnnotAstF ElemPos, a ~ IxFix (AnnotAstF ElemPos)
+               , st ~ M.Map Var (ElemPos, (AssocType, Int))
+               ) => a i -> (a i)
+groupEquations ast = ana (out >>> psi) ast where
+  psi :: forall i'. t a i' -> t a i'
+  psi (Annot (pos, DeclsF decls)) = let
+    children = unfoldr consumeGroup (decls :: [a AstDecl])
+    in Annot (pos, DeclsF children)
+  psi x                           = x
+
+  consumeGroup :: [a AstDecl] -> Maybe (a AstDecl, [a AstDecl])
+  consumeGroup []     = Nothing
+  consumeGroup (d:ds) = case getFnName d of
+      Nothing   -> Just (d, ds)
+      Just name -> let
+        (this, rest) = break ((== Just name) . getFnName) (d:ds)
+        positions    = map (fst . unAnnot . out) this
+        grouped      = In $ Annot (elemPos positions, FnDefF name this)
+        in Just (grouped, rest)
+
+  getFnName :: a AstDecl -> Maybe Var
+  getFnName = out >>> unAnnot >>> snd >>> (\case
+    EqtF lhs _ _ -> let
+      name  = case lhs of FnArgsF x _ -> x
+                          FnOpF _ x _ -> x
+      (VarF name' _) = snd $ unAnnot $ out name
+      in Just name'
+    _            -> Nothing)
+
+--   ## Adjust AST
 adjustAst :: forall m0 m a t st i.
           ( ISParserEnv m0, m ~ StateT st m0
           , t ~ AnnotAstF ElemPos, a ~ IxFix (AnnotAstF ElemPos)
@@ -34,9 +69,9 @@ adjustAst ast = evalStateT (anaM psi $ ast) M.empty where
   psi :: forall i'. a i' -> m (t a i')
   psi (In x@(Annot (_, node))) = do
     () <- case node of
-      LetF decls _ -> collect decls >>= mergeEnv >>= put
-      EqtF _ _ whs -> collect whs   >>= mergeEnv >>= put
-      EqtsF decls  -> collect decls >>= mergeEnv >>= put
+      LetF ds _    -> collect (out ds)  >>= mergeEnv >>= put
+      EqtF _ _ whs -> collect (out whs) >>= mergeEnv >>= put
+      DeclsF _     -> collect x         >>= mergeEnv >>= put
       _            -> return ()
     case node of
       InfixF _ _ _ -> adjust x
@@ -45,8 +80,10 @@ adjustAst ast = evalStateT (anaM psi $ ast) M.empty where
   mergeEnv :: st -> m st
   mergeEnv news = M.union <$> pure news <*> get
 
-  collect :: [a AstDecl] -> m st
-  collect xs = let
+  collect :: t a AstDecl -> m st
+  collect x = let
+    (DeclsF xs) = snd $ unAnnot x
+
     unOp (VarF op _) = op
     unOp (ConF op _) = op
     unOp _           = impossible

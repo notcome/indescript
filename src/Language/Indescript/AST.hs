@@ -42,8 +42,8 @@ data AstF (f :: AstIx -> *) (i :: AstIx) where
   TyAnnF :: f AstExpr -> f AstType -> AstF f AstExpr
   IfF    :: f AstExpr -> f AstExpr -> f AstExpr -> AstF f AstExpr
   LamF   :: [f AstPatt] -> f AstExpr -> AstF f AstExpr
-  LetF   :: [f AstDecl] -> f AstExpr -> AstF f AstExpr
-  AltF   :: f AstPatt -> f AstExpr -> [f AstDecl] -> AstF f AstExpr
+  LetF   :: f AstDecl -> f AstExpr -> AstF f AstExpr
+  AltF   :: f AstPatt -> f AstExpr -> f AstDecl -> AstF f AstExpr
   CaseF  :: f AstExpr -> [f AstExpr] -> AstF f AstExpr
 --   ## Complex AST Type
 -- Generalized types, also known as “schemes”.
@@ -52,12 +52,14 @@ data AstF (f :: AstIx -> *) (i :: AstIx) where
   BindF  :: f AstPatt -> f AstPatt -> AstF f AstPatt
   HoleF  :: AstF f AstPatt
 --   ## Complex AST Declarations
--- Ordinary equation/function definitions.
-  EqtF   :: FnLhsF f AstExpr -> f AstExpr -> [f AstDecl] -> AstF f AstDecl
--- Equation groups.
--- Used both for multiple branch of a single function and binding groups during
---   type inference in order to obtain most generalized types.
-  EqtsF  :: [f AstDecl] -> AstF f AstDecl
+-- An equation, e.g. add 2 2 = 5
+  EqtF   :: FnLhsF f AstExpr -> f AstExpr -> f AstDecl -> AstF f AstDecl
+-- A function definition, namely a group of equations with same “name”.
+  FnDefF :: Var -> [f AstDecl] -> AstF f AstDecl
+-- Declartion groups, used for
+--   1. A container of each group of where-clauses.
+--   2. Dependency group for most generalized types during type reconstruction.
+  DeclsF :: [f AstDecl] -> AstF f AstDecl
 -- Operator fixity declarations.
 -- Removed after adjusting AST.
   OpFixF :: AssocType -> Int -> [f AstExpr] -> AstF f AstDecl
@@ -83,15 +85,16 @@ instance IxTraversable AstF where
     (TyAnnF e t)   -> TyAnnF <$> f e <*> f t
     (IfF e1 e2 e3) -> IfF <$> f e1 <*> f e2 <*> f e3
     (LamF patts e) -> LamF <$> traverse f patts <*> f e
-    (LetF decls e) -> LetF <$> traverse f decls <*> f e
-    (AltF p e ds)  -> AltF <$> f p <*> f e <*> traverse f ds
+    (LetF decls e) -> LetF <$> f decls <*> f e
+    (AltF p e ds)  -> AltF <$> f p <*> f e <*> f ds
     (CaseF e alts) -> CaseF <$> f e <*> traverse f alts
     (TyGenF ts ty) -> TyGenF <$> traverse f ts <*> f ty
     (BindF as src) -> BindF <$> f as <*> f src
     (HoleF)        -> pure HoleF
 -- Declarations
-    (EqtF lhs e ds)  -> EqtF <$> itraverse f lhs <*> f e <*> traverse f ds
-    (EqtsF decls)    -> EqtsF <$> traverse f decls
+    (EqtF lhs e ds)  -> EqtF <$> itraverse f lhs <*> f e <*> f ds
+    (FnDefF fn alts) -> FnDefF <$> pure fn <*> traverse f alts
+    (DeclsF decls)   -> DeclsF <$> traverse f decls
     (OpFixF d l ops) -> OpFixF d l <$> traverse f ops
     (TySigF xs ty)   -> TySigF <$> traverse f xs <*> f ty
     (TyAlsF t' t)    -> TyAlsF <$> f t' <*> f t
