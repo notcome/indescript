@@ -14,15 +14,12 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Language.Indescript.ADT
-                     , Language.Indescript.TypeInference
-                     , Language.Indescript.Parser.Pos
-                     , Language.Indescript.Parser.Lexer
-                     , Language.Indescript.Parser
-                     , Language.Indescript.Syntax
-                     , Language.Indescript.Parser.Prim
-                     , Data.Annotation
-                     , Data.Convertible
+  exposed-modules:     Language.Indescript.AST
+                     , Language.Indescript.AST.SourcePos
+                     , Language.Indescript.Parser.Poster
+                     --, Language.Indescript.Parser.Lexer
+                     --, Language.Indescript.Parser
+                     --, Language.Indescript.Parser.Prim
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , mtl

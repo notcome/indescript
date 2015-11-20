@@ -5,7 +5,7 @@
 {-# LANGUAGE RankNTypes     #-}
 {-# LANGUAGE TupleSections  #-}
 
-module Language.Indescript.Syntax where
+module Language.Indescript.AST where
 
 import Control.IxFix
 
@@ -90,8 +90,8 @@ instance IxTraversable AstF where
     (BindF as src) -> BindF <$> f as <*> f src
     (HoleF)        -> pure HoleF
 -- Declarations
-    (EqtF lhs e whs) -> EqtF <$> itraverse f lhs <*> f e <*> traverse f whs
-    (EqtsF eqts)     -> EqtsF <$> traverse f eqts
+    (EqtF lhs e ds)  -> EqtF <$> itraverse f lhs <*> f e <*> traverse f ds
+    (EqtsF decls)    -> EqtsF <$> traverse f decls
     (OpFixF d l ops) -> OpFixF d l <$> traverse f ops
     (TySigF xs ty)   -> TySigF <$> traverse f xs <*> f ty
     (TyAlsF t' t)    -> TyAlsF <$> f t' <*> f t
@@ -116,7 +116,7 @@ data Var = VarId  String
          | ConId  String
          | VarSym String
          | ConSym String
-         deriving (Eq, Show)
+         deriving (Eq, Show, Ord)
 
 data AssocType = Infix | InfixL | InfixR deriving (Eq, Show)
 
@@ -134,17 +134,3 @@ instance IxTraversable FnLhsF where
 
 removeAnnot :: IxFix (AnnotAstF a) i -> IxFix AstF i
 removeAnnot = cata (In . snd . unAnnot)
-
-{-
-collectBoundNames :: IxFix (AnnotAstF ElemPos) i
-                  -> IxFix (AnnotAstF _) i
-collectBoundNames = cata (In . collect . unAnnot) where
-  collect (pos, ast) = (\case
-    e@(LamF patts _) -> let bns   = map boundNames patts
-                            annt' = SomeCon bns pos
-                        in Annot (annt', e)
-    e@(LetF decls _) -> let bns   = map boundNames decls
-                            annt' = SomeCon bns pos
-                        in Annot (annt', e)
-    ) ast
--}

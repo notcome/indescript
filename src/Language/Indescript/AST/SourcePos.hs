@@ -1,4 +1,4 @@
-module Language.Indescript.Parser.Pos where
+module Language.Indescript.AST.SourcePos where
 
 --    # Datatypes and Functions
 --   ## SourcePoint
@@ -60,6 +60,25 @@ diffPoint p0 p1 = let
   dr = srcRow p1 - srcRow p0
   dc = srcCol p1 - srcCol p0
   in SourceSpan (dr, dc)
+
+class GetElemPos a where
+  elemPos :: a -> ElemPos
+
+instance GetElemPos ElemPos where
+  elemPos = id
+
+instance (GetElemPos a, GetElemPos b) => GetElemPos (a, b) where
+  elemPos (l, r) = let
+    lp = elemPos l; ls = startPoint lp; le = endPoint lp
+    rp = elemPos r; rs = startPoint rp; re = endPoint rp
+    ps = min ls rs
+    pe = max le re
+    in ElemPos ps (diffPoint ps pe)
+
+instance GetElemPos a => GetElemPos [a] where
+  elemPos = foldl1 combine . map elemPos
+    where
+      combine l r = elemPos (l, r)
 
 --   ## Show Instance
 instance Show SourcePoint where
