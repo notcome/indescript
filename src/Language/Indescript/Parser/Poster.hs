@@ -2,15 +2,18 @@
 --   1. Check certian invalid occurences of tokens, like normal operators inside
 --      patterns.
 --   2. Adjust AST according to operator fixity information.
---   3. Check redefinitions and missing definitions, and group definitions of
---      the same functions.
---   4. Check unbound variables and build a bound name table.
+--   3. Group equations into function definitions.
+--   4. Check redefinitions.
+--   5. Check redefinitions.
+--   4. Check unbound variables and missing declarations;
+--        build a bound name table.
 
 {-# LANGUAGE ConstraintKinds     #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections       #-}
 
 module Language.Indescript.Parser.Poster where
 
@@ -28,44 +31,13 @@ import Language.Indescript.AST
 
 type ISParserEnv m = MonadError String m
 
---   ## Group Equations
-groupEquations :: forall a t st i.
-               ( t ~ AnnotAstF ElemPos, a ~ IxFix (AnnotAstF ElemPos)
-               , st ~ M.Map Var (ElemPos, (AssocType, Int))
-               ) => a i -> (a i)
-groupEquations ast = ana (out >>> psi) ast where
-  psi :: forall i'. t a i' -> t a i'
-  psi (Annot (pos, DeclsF decls)) = let
-    children = unfoldr consumeGroup (decls :: [a AstDecl])
-    in Annot (pos, DeclsF children)
-  psi x                           = x
-
-  consumeGroup :: [a AstDecl] -> Maybe (a AstDecl, [a AstDecl])
-  consumeGroup []     = Nothing
-  consumeGroup (d:ds) = case getFnName d of
-      Nothing   -> Just (d, ds)
-      Just name -> let
-        (this, rest) = break ((== Just name) . getFnName) (d:ds)
-        positions    = map (fst . unAnnot . out) this
-        grouped      = In $ Annot (elemPos positions, FnDefF name this)
-        in Just (grouped, rest)
-
-  getFnName :: a AstDecl -> Maybe Var
-  getFnName = out >>> unAnnot >>> snd >>> (\case
-    EqtF lhs _ _ -> let
-      name  = case lhs of FnArgsF x _ -> x
-                          FnOpF _ x _ -> x
-      (VarF name' _) = snd $ unAnnot $ out name
-      in Just name'
-    _            -> Nothing)
-
 --   ## Adjust AST
 adjustAst :: forall m0 m a t st i.
           ( ISParserEnv m0, m ~ StateT st m0
           , t ~ AnnotAstF ElemPos, a ~ IxFix (AnnotAstF ElemPos)
           , st ~ M.Map Var (ElemPos, (AssocType, Int))
           ) => a i -> m0 (a i)
-adjustAst ast = evalStateT (anaM psi $ ast) M.empty where
+adjustAst ast = evalStateT (anaM psi ast) M.empty where
   psi :: forall i'. a i' -> m (t a i')
   psi (In x@(Annot (_, node))) = do
     () <- case node of
@@ -84,31 +56,29 @@ adjustAst ast = evalStateT (anaM psi $ ast) M.empty where
   collect x = let
     (DeclsF xs) = snd $ unAnnot x
 
-    unOp (VarF op _) = op
-    unOp (ConF op _) = op
-    unOp _           = impossible
-
     fixities = concat $ do
-      let xs' = map (unAnnot . out) xs
+      let xs' = map outAnnot xs
       (pos, (OpFixF dir lv ops)) <- xs'
       let info = (pos, (dir, lv))
-      let ops' = map (snd . unAnnot . out) ops
+      let ops' = map rmAnnot ops
       return [(unOp op, info) | op <- ops']
-    build (op, v@(pos', _)) env =
-      case M.lookup op env of
-        Just (pos, _) -> throwError $ errorRedefineOpFixity op pos pos'
-        Nothing       -> return $ M.insert op v env
-    in foldrM build M.empty fixities
+-- Fixity redefinition chec is performed afterwards, which does not affect the
+--   overall correctness: if there is no conflict, the program will be adjusted
+--   correctly; if not, compilation will abort anyway.
+    in return $ M.fromList fixities
 
   adjust :: forall i'. t a i' -> m (t a i')
   adjust x = do
     env <- get
-    case resolveAssoc (findWithDefault env 9 $ snd . snd)
-                      (findWithDefault env Infix $ fst . snd)
+    case resolveAssoc (findWithDefault env 9 getLv)
+                      (findWithDefault env InfixL getAssoc)
                       x of
       Left errMsg -> throwError errMsg
       Right x'    -> return x'
     where
+      getLv    = snd . snd
+      getAssoc = fst . snd
+
       findWithDefault env def f = \k ->
         case M.lookup k env of
           Just i  -> f i
@@ -131,11 +101,8 @@ resolveAssoc lv assoc ast = case getFullExpr ast of
   where
     getFullExpr :: ast -> [Either dop ast]
     getFullExpr (Annot (_, InfixF l o r)) =
-      Right (out l) : Left ((unOp . snd . unAnnot . out) o, const o)
+      Right (out l) : Left (unOp $ rmAnnot o, const o)
                     : getFullExpr (out r)
-      where unOp (VarF op _) = op
-            unOp (ConF op _) = op
-            unOp _           = impossible
     getFullExpr _ = []
 
     parse :: dop -> ast -> [Either dop ast] -> Maybe (ast, [Either dop ast])
@@ -153,9 +120,128 @@ resolveAssoc lv assoc ast = case getFullExpr ast of
            parse (o1, f1) combined rest'
     parse _ _ _ = impossible
 
+--   ## Group Equations
+-- This operation must be performed after adjusting AST. Consider:
+-- > 1 : [] +++ 2 : []
+-- > infixr 9 []
+-- > infixl 8 +++
+groupEquations :: forall m a t i.
+               ( ISParserEnv m
+               , t ~ AnnotAstF ElemPos, a ~ IxFix (AnnotAstF ElemPos)
+               ) => a i -> m (a i)
+groupEquations ast = return $ ana (out >>> psi) ast where
+  psi :: forall i'. t a i' -> t a i'
+  psi (Annot (pos, DeclsF decls)) = let
+    children = unfoldr consumeGroup (decls :: [a AstDecl])
+    in Annot (pos, DeclsF children)
+  psi x                           = x
+
+  consumeGroup :: [a AstDecl] -> Maybe (a AstDecl, [a AstDecl])
+  consumeGroup []     = Nothing
+  consumeGroup (d:ds) = case fnName d of
+      Nothing   -> Just (d, ds)
+      Just name -> let
+        (this, rest) = break ((== Just name) . fnName) (d:ds)
+        positions    = map (fst . outAnnot) this
+        grouped      = In $ Annot (elemPos positions, FnDefF name this)
+        in Just (grouped, rest)
+
+  fnName :: a AstDecl -> Maybe Var
+  fnName = out >>> unAnnot >>> snd >>> (\case
+    EqtF lhs _ _ -> let
+      name  = case lhs of FnArgsF x _ -> x
+                          FnOpF _ x _ -> x
+      (VarF name' _) = snd $ unAnnot $ out name
+      in Just name'
+    _            -> Nothing)
+
+--   ## Check Redefinitions
+checkRedefns :: forall m a t i.
+             ( ISParserEnv m
+             , t ~ AnnotAstF ElemPos, a ~ IxFix (AnnotAstF ElemPos)
+             ) => a i -> m (a i)
+checkRedefns ast = anaM (out >>> psi) ast where
+  psi :: forall i'. t a i' -> m (t a i')
+  psi x@(Annot (_, DeclsF decls)) = check decls *> return x
+  psi x                           = return x
+
+  check :: forall i'. [a i'] -> m ()
+  check xs = let
+    fixities  = filterDecls (\(OpFixF _ _ ops) ->
+      map (unOp . rmAnnot) ops)
+    typesigs  = filterDecls (\(TySigF fns _) ->
+      [fn | VarF fn _ <- map rmAnnot fns])
+    functions = filterDecls (\(FnDefF name _) -> [name])
+
+    typecons  = filterDecls ( \case
+      TyAlsF ty _   -> [unTycon ty]
+      NewTyF ty _ _ -> [unTycon ty]
+      DatTyF ty _   -> [unTycon ty]
+      _             -> impossible )
+
+    termcons  = let
+      ofNewTys = filterDecls (\(NewTyF _ ty _) -> [unTycon ty])
+      ofDatTys = do
+        DatTyF _ alts <- fmap rmAnnot xs
+        alt           <- alts
+        return (unTycon alt, fst $ outAnnot alt)
+      in ofNewTys ++ ofDatTys
+
+    in sequence_
+      [ foldrM (build errorRedefineOpFixity) M.empty fixities
+      , foldrM (build errorRedefineTypeSig)  M.empty typesigs
+      , foldrM (build errorRedefineFunction) M.empty functions
+      , foldrM (build errorRedefineTypeCon)  M.empty typecons
+      , foldrM (build errorRedefineTermCon)  M.empty termcons
+      ]
+    where
+      build err (k, pos) acc =
+        case M.lookup k acc of
+          Nothing   -> return $ M.insert k pos acc
+          Just pos' -> throwError $ err k pos' pos
+
+      filterDecls getId = do
+        let xs' = map outAnnot xs
+        (pos, decl) <- xs'
+        (, pos) <$> getId decl
+
+      unTycon x = case rmAnnot x of
+        ConF tv _    -> tv
+        AppF fn _    -> unOp $ rmAnnot fn
+        InfixF _ o _ -> unOp $ rmAnnot o
+        _         -> impossible
+
+--    # Helper Types and Functions
+unOp :: AstF f i -> Var
+unOp (VarF op _) = op
+unOp (ConF op _) = op
+unOp _           = impossible
+
+outAnnot :: IxFix (AnnotAstF a) i -> (a, AstF (IxFix (AnnotAstF a)) i)
+outAnnot = unAnnot . out
+
+rmAnnot :: IxFix (AnnotAstF a) i -> AstF (IxFix (AnnotAstF a)) i
+rmAnnot = snd . outAnnot
+
 errorRedefineOpFixity :: Var -> ElemPos -> ElemPos -> String
 errorRedefineOpFixity op pos pos' = "redefine op " ++
   show op ++ " at pos " ++ show pos ++ " and " ++ show pos'
+
+errorRedefineTypeSig :: Var -> ElemPos -> ElemPos -> String
+errorRedefineTypeSig op pos pos' = "redefine type signature " ++
+  show op ++ " at pos " ++ show pos ++ " and " ++ show pos'
+
+errorRedefineFunction :: Var -> ElemPos -> ElemPos -> String
+errorRedefineFunction fn pos pos' = "redefine function " ++
+  show fn ++ " at pos " ++ show pos ++ " and " ++ show pos'
+
+errorRedefineTypeCon :: Var -> ElemPos -> ElemPos -> String
+errorRedefineTypeCon fn pos pos' = "redefine type constructor " ++
+  show fn ++ " at pos " ++ show pos ++ " and " ++ show pos'
+
+errorRedefineTermCon :: Var -> ElemPos -> ElemPos -> String
+errorRedefineTermCon fn pos pos' = "redefine term constructor " ++
+  show fn ++ " at pos " ++ show pos ++ " and " ++ show pos'
 
 impossible :: a
 impossible = error "impossible!"
