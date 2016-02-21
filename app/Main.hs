@@ -1,3 +1,3 @@
 module Main where
 
-main = putStrLn "Hello, Indescript"
+main = undefined

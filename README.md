@@ -1,3 +1,4 @@
 # Indescript
-A toy compiler for a Haskell-like language, at early stage and under heavy
-development.
+
+Indescript is a toy compiler for a Haskell-like language, at early stage yet
+the development progress is slow.
