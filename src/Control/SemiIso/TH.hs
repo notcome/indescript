@@ -73,12 +73,12 @@ defineSemiIso decName tvs defaultB con = let
                 []
 
   tupType = uncurried tupT fts'
-  isoType = forallT (tvs ++ conTvs) (return conCxt)
+  isoType = forallT (tvs ++ conTvs) (return conCtx)
                     (appT (appT (conT $ mkName "SemiIso") tupType) decType)
   outType = let
     fromType = decType
     toType   = (appT (conT $ mkName "Maybe") tupType)
-    in forallT (tvs ++ conTvs) (return conCxt)
+    in forallT (tvs ++ conTvs) (return conCtx)
              (appT (appT arrowT fromType) toType)
 
   outDec = sigD (mkName "out")  outType
@@ -89,11 +89,11 @@ defineSemiIso decName tvs defaultB con = let
                in (map varE vnames, map varP vnames)
     decType  = buildDecType decName tvs
 
-    (conTvs, conCxt, fts) = constructorTypes con
+    (conTvs, conCtx, fts) = constructorTypes con
     fts'                  = map return fts
 
     tupT [t1, t2] = appT (appT (tupleT 2) t1) t2
-    tupT _        = error "tupT only accepts two TypeQ"
+    tupT _        = error "tupT accepts two TypeQ only"
 
     uncurried tupX []     = tupX []
     uncurried _    [x]    = x

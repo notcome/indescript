@@ -13,6 +13,7 @@ module Language.Indescript.AST where
 
 import Data.Proxy
 
+import Control.IxPF.TH
 import Control.SemiIso
 import Control.SemiIso.TH
 
@@ -52,44 +53,4 @@ data Ast i where
   Case  :: Ast Expr -> [Ast Expr] -> Ast Expr
 
 $(deriveSemiIsos ''Ast)
-
-type family PF adt :: (* -> *) -> (* -> *)
-
--- (DataD [] Ast [KindedTV ix (ConT AstIx)]
---   [NormalC Var
---     [(NotStrict,AppT (ConT Proxy) (VarT ix)),(NotStrict,ConT Name)],
---
---   NormalC Con [(NotStrict,AppT (ConT Proxy) (VarT ix)),(NotStrict,ConT Name)],
---
---   NormalC Lit [(NotStrict,AppT (ConT Proxy) (VarT ix)),(NotStrict,ConT Lit)],
---
---   NormalC Paren [(NotStrict,AppT (ConT Ast) (VarT ix))],NormalC App [(NotStrict,AppT (ConT Ast) (VarT ix)),(NotStrict,AppT ListT (AppT (ConT Ast) (VarT ix)))],
---
---   NormalC Infix [(NotStrict,AppT (ConT Ast) (VarT ix)),(NotStrict,AppT (ConT Ast) (VarT ix)),(NotStrict,AppT (ConT Ast) (VarT ix))],
---
---   ForallC [] [AppT (AppT EqualityT (VarT ix)) (ConT Expr)]
---     (NormalC Neg [(NotStrict,AppT (ConT Ast) (ConT Expr))]),
---
---   ForallC [] [AppT (AppT EqualityT (VarT ix)) (ConT Expr)]
---     (NormalC LOSec [(NotStrict,AppT (ConT Ast) (ConT Expr)),(NotStrict,AppT (ConT Ast) (ConT Expr))]),
---
---   ForallC [] [AppT (AppT EqualityT (VarT ix)) (ConT Expr)]
---     (NormalC ROSec [(NotStrict,AppT (ConT Ast) (ConT Expr)),(NotStrict,AppT (ConT Ast) (ConT Expr))]),
---
---   ForallC [] [AppT (AppT EqualityT (VarT ix)) (ConT Expr)]
---     (NormalC TyAnn [(NotStrict,AppT (ConT Ast) (ConT Expr)),(NotStrict,AppT (ConT Ast) (ConT Type))]),
---
---   ForallC [] [AppT (AppT EqualityT (VarT ix)) (ConT Expr)]
---     (NormalC If [(NotStrict,AppT (ConT Ast) (ConT Expr)),(NotStrict,AppT (ConT Ast) (ConT Expr)),(NotStrict,AppT (ConT Ast) (ConT Expr))]),
---
---   ForallC [] [AppT (AppT EqualityT (VarT ix)) (ConT Expr)]
---     (NormalC Lam [(NotStrict,AppT ListT (AppT (ConT Ast) (ConT Patt))),(NotStrict,AppT (ConT Ast) (ConT Expr))]),
---
---   ForallC [] [AppT (AppT EqualityT (VarT ix)) (ConT Expr)]
---     (NormalC Let [(NotStrict,AppT (ConT Ast) (ConT Decl)),(NotStrict,AppT (ConT Ast) (ConT Expr))]),
---
---   ForallC [] [AppT (AppT EqualityT (VarT ix)) (ConT Expr)]
---     (NormalC Alt [(NotStrict,AppT (ConT Ast) (ConT Patt)),(NotStrict,AppT (ConT Ast) (ConT Expr)),(NotStrict,AppT (ConT Ast) (ConT Decl))]),
---
---   ForallC [] [AppT (AppT EqualityT (VarT ix)) (ConT Expr)]
---     (NormalC Case [(NotStrict,AppT (ConT Ast) (ConT Expr)),(NotStrict,AppT ListT (AppT (ConT Ast) (ConT Expr)))])] [])
+$(deriveIxPF ''Ast)
