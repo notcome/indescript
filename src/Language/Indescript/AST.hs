@@ -3,16 +3,16 @@
 {-# LANGUAGE DataKinds       #-}
 {-# LANGUAGE GADTs           #-}
 {-# LANGUAGE KindSignatures  #-}
-{-# LANGUAGE LambdaCase      #-}
 {-# LANGUAGE RankNTypes      #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies    #-}
-{-# LANGUAGE TupleSections   #-}
+{-# LANGUAGE TypeOperators   #-}
 
 module Language.Indescript.AST where
 
 import Data.Proxy
 
+import Control.IxPF
 import Control.IxPF.TH
 import Control.SemiIso
 import Control.SemiIso.TH
@@ -53,4 +53,14 @@ data Ast i where
   Case  :: Ast Expr -> [Ast Expr] -> Ast Expr
 
 $(deriveSemiIsos ''Ast)
-$(deriveIxPF ''Ast)
+$(deriveIxPFType ''Ast)
+$(deriveIxPFTraversal ''AstF)
+
+instance ToIxPF Ast where
+  toIxPF = ana alg where
+    alg :: Ast ~> AstF Ast
+    alg (Var i n)  = VarF i n
+    alg (Con i n)  = ConF i n
+    alg (Lit i l)  = LitF i l
+    alg (Paren x)  = ParenF x
+    alg (App f xs) = AppF f xs
