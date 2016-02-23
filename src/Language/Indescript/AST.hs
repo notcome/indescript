@@ -53,14 +53,7 @@ data Ast i where
   Case  :: Ast Expr -> [Ast Expr] -> Ast Expr
 
 $(deriveSemiIsos ''Ast)
-$(deriveIxPFType ''Ast)
-$(deriveIxPFTraversal ''AstF)
-
-instance ToIxPF Ast where
-  toIxPF = ana alg where
-    alg :: Ast ~> AstF Ast
-    alg (Var i n)  = VarF i n
-    alg (Con i n)  = ConF i n
-    alg (Lit i l)  = LitF i l
-    alg (Paren x)  = ParenF x
-    alg (App f xs) = AppF f xs
+$(deriveIxPF     ''Ast)
+-- $(deriveIxPFType ''Ast)
+-- $(deriveIxPFTraversal ''Ast)
+-- $(deriveIxPFToIxPF ''Ast)

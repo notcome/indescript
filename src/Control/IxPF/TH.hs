@@ -1,6 +1,11 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module Control.IxPF.TH where
+module Control.IxPF.TH
+  ( deriveIxPFType
+  , deriveIxPFTraversal
+  , deriveIxPFToIxPF
+  , deriveIxPF
+  ) where
 
 import Language.Haskell.TH
 
@@ -37,19 +42,20 @@ makeIxPFCon name = do
   conTy <- varT fname
   return (ixPFName, fname, conTy)
 
+renameCon, renameOp :: Name -> Name
+renameCon name = mkName $ (nameBase name) ++ "F"
+renameOp  name = mkName $ (nameBase name) ++ "/"
+
 replaceCon :: Name -> Type -> Con -> Con
 replaceCon oldName newConT = replaceC where
   oldConT = ConT oldName
 
-  renameField name = mkName $ (nameBase name) ++ "F"
-  renameInfix name = mkName $ (nameBase name) ++ "/"
-
-  replaceC (NormalC n ts)   = NormalC (renameField n)
+  replaceC (NormalC n ts)   = NormalC (renameCon n)
                                 [(x, replaceT t) | (x, t) <- ts]
-  replaceC (RecC n0 ts)     = RecC (renameField n0)
+  replaceC (RecC n0 ts)     = RecC (renameCon n0)
                                 [(n, x, replaceT t) | (n, x, t) <- ts]
   replaceC (InfixC t1 o t2) = InfixC (replaceT <$> t1)
-                                     (renameInfix o)
+                                     (renameOp o)
                                      (replaceT <$> t2)
   replaceC (ForallC tvs ctx con) = ForallC tvs ctx $ replaceC con
 
@@ -65,33 +71,28 @@ replaceCon oldName newConT = replaceC where
 deriveIxPFTraversal :: Name -> Q [Dec]
 deriveIxPFTraversal input = do
   TyConI dec <- reify input
-  (name, _, tvs, cons, _) <- extractDecInfo dec
-  let tv    = case tvs of
-                (x:_) -> x
-                _     -> error "should have exactly 2 tvs"
-  let fname = case tv of
-                KindedTV n _ -> n
-                _            -> error "should be a KindedTV"
-  itraverseF <- traversalFun fname cons
+  (name, _, _, cons, _) <- extractDecInfo dec
+  itraverseF <- traversalFun name cons
+  let name' = renameCon name
   let imapF = FunD (mkName "imap")
                    [Clause [] (NormalB (VarE (mkName "imapDefault"))) []]
   let traverseI = InstanceD [] (AppT (ConT $ mkName "IxTraversable")
-                                     (ConT name)) [itraverseF]
+                                     (ConT name')) [itraverseF]
   let functorI  = InstanceD [] (AppT (ConT $ mkName "IxFunctor")
-                                     (ConT name)) [imapF]
+                                     (ConT name')) [imapF]
   return [traverseI, functorI]
 
 traversalFun :: Name -> [Con] -> Q Dec
-traversalFun fname cons = do
+traversalFun adtName cons = do
   funN <- newName "f"
   varN <- newName "x"
   let traversalCase = CaseE (VarE varN)
-                            (traversalBranches (VarT fname) funN cons)
+                            (traversalBranches (ConT adtName) funN cons)
   let fclause = Clause [VarP funN, VarP varN] (NormalB traversalCase) []
   return $ FunD (mkName "itraverse") [fclause]
 
 traversalBranches :: Type -> Name -> [Con] -> [Match]
-traversalBranches ftype funN cons = map traversalBranch cons where
+traversalBranches adtType funN cons = map traversalBranch cons where
   vnameSeq = [ mkName ('v' : show i)| i <- [1..] :: [Int]]
 
   pureE    e = AppE (VarE $ mkName "pure") e
@@ -101,11 +102,12 @@ traversalBranches ftype funN cons = map traversalBranch cons where
   traversalBranch (ForallC _ _ con)  = traversalBranch con
   traversalBranch (NormalC n sts)    = let
     fields = [t | (_, t) <- sts]
-    in matchFromFields n fields
+    in matchFromFields (renameCon n) fields
   traversalBranch (RecC n vsts)      = let
     fields = [t | (_, _, t) <- vsts]
-    in matchFromFields n fields
-  traversalBranch (InfixC st1 o st2) = matchFromInfix (snd st1) o (snd st2)
+    in matchFromFields (renameCon n) fields
+  traversalBranch (InfixC st1 o st2) =
+    matchFromInfix (snd st1) (renameOp o) (snd st2)
 
   matchFromFields n ts   = let
     values = [valueFromField vn vt | (vn, vt) <- zip vnameSeq ts]
@@ -126,8 +128,53 @@ traversalBranches ftype funN cons = map traversalBranch cons where
     dollar      = UInfixE base (VarE $ mkName "<$>") v
 
   valueFromField :: Name -> Type -> Exp
-  valueFromField vname (AppT ftype' _)
-    | ftype == ftype'    = funE     (VarE vname)
-  valueFromField vname (AppT _ (AppT ftype' _))
-    | ftype == ftype'    = traveseE (VarE vname)
+  valueFromField vname (AppT adtType' _)
+    | adtType == adtType'    = funE     (VarE vname)
+  valueFromField vname (AppT _ (AppT adtType' _))
+    | adtType == adtType'    = traveseE (VarE vname)
   valueFromField vname _ = pureE    (VarE vname)
+
+deriveIxPFToIxPF :: Name -> Q [Dec]
+deriveIxPFToIxPF input = do
+  TyConI adtDec <- reify input
+  (adtName, _, _, adtCons, _) <- extractDecInfo adtDec
+  let instType = AppT (ConT $ mkName "ToIxPF") (ConT adtName)
+  let clauses  = toIxPFClauses adtCons
+  let convAlg  = FunD (mkName "alg") clauses
+  let function = FunD (mkName "toIxPF") [Clause []
+                      (NormalB (AppE (VarE $ mkName "ana")
+                                     (VarE $ mkName "alg")))
+                      [convAlg]]
+  return [InstanceD [] instType [function]]
+
+toIxPFClauses :: [Con] -> [Clause]
+toIxPFClauses = map toIxPFClause
+  where
+    varPats = [ VarP $ mkName ('v' : show i)| i <- [1..] :: [Int]]
+    varExps = [ VarE $ mkName ('v' : show i)| i <- [1..] :: [Int]]
+
+    toIxPFClause (ForallC _ _ con) = toIxPFClause con
+    toIxPFClause (NormalC name ts) = let
+      size = length ts
+      in clauseWithConName name size
+    toIxPFClause (RecC    name ts) = let
+      size = length ts
+      in clauseWithConName name size
+    toIxPFClause (InfixC _ o _)    = let
+      lhs = InfixP  (varPats !! 0) o (varPats !! 1)
+      rhs = UInfixE (varExps !! 0)
+                    (VarE $ renameOp o)
+                    (varExps !! 1)
+      in Clause [lhs] (NormalB rhs) []
+
+    clauseWithConName name size = let
+      lhs = ConP name (take size varPats)
+      rhs = foldl AppE (ConE $ renameCon name) $ take size varExps
+      in Clause [lhs] (NormalB rhs) []
+
+deriveIxPF :: Name -> Q [Dec]
+deriveIxPF name = do
+  ixPFType      <- deriveIxPFType      name
+  ixPFTraversal <- deriveIxPFTraversal name
+  ixPFToIxPF    <- deriveIxPFToIxPF    name
+  return $ ixPFType ++ ixPFTraversal ++ ixPFToIxPF
